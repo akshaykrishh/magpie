@@ -3,6 +3,7 @@
 mod backend;
 mod clipboard;
 mod error;
+mod freshness;
 #[cfg(target_os = "macos")]
 mod macos;
 

@@ -11,7 +11,7 @@ mod search;
 mod tags;
 
 pub use captures::NewSource;
-pub use db::{now_iso, Store};
+pub use db::{default_db_path, now_iso, Store};
 pub use error::{Error, Result};
 pub use export::CaptureExport;
 pub use model::{AuditEntry, Capture, Project, Source, Tag, Template};

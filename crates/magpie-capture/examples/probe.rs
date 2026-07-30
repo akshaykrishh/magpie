@@ -16,6 +16,7 @@ fn main() {
             MacosBackend::is_accessibility_trusted()
         );
         println!("frontmost app: {:?}", backend.front_app());
+        println!("secure input blocked: {}", backend.secure_input_blocked());
         println!("(current clipboard text: {:?})", backend.read_capture_text());
     }
 

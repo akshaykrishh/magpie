@@ -18,6 +18,16 @@ pub fn now_iso() -> String {
 
 const MIGRATIONS: &[(&str, &str)] = &[("0001_init", include_str!("../migrations/0001_init.sql"))];
 
+/// `~/Library/Application Support/magpie/magpie.db` on macOS,
+/// `~/.local/share/magpie/magpie.db` on Linux (or `$XDG_DATA_HOME` if set).
+/// A conventional, documented, unencrypted path -- see docs/design.md
+/// "own your data through transparency" -- so anyone can find and open it
+/// with plain `sqlite3`. Shared by every process that opens a `Store`
+/// (GUI, CLI, MCP server), which is what makes them see the same data.
+pub fn default_db_path() -> Option<std::path::PathBuf> {
+    dirs::data_dir().map(|d| d.join("magpie").join("magpie.db"))
+}
+
 /// A single connection to the magpie database, safe to share within one
 /// process behind a mutex. Separate processes (GUI, CLI, MCP server) each
 /// open their own `Store` against the same file -- WAL mode plus SQLite's

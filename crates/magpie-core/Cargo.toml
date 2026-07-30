@@ -7,6 +7,7 @@ repository.workspace = true
 description = "Domain model, storage, search, and export for magpie"
 
 [dependencies]
+dirs = "6"
 rusqlite = { version = "0.40", features = ["bundled", "backup"] }
 serde.workspace = true
 serde_json.workspace = true

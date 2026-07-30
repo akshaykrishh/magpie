@@ -150,10 +150,36 @@ exchange for Accessibility. Consent from someone who's felt the friction is cons
 resent. Never ask for a frightening permission before demonstrating value.
 
 **One-key uses synthesize-copy, not the accessibility tree.** Post Cmd/Ctrl+C to the focused app,
-poll the pasteboard change count with a timeout, restore the previous contents. `AXSelectedText`
-works well in native Cocoa apps and fails in Chrome, Cursor, and Electron — exactly where these
-users live. Synthesize-copy is less code and better coverage. **No AX code in v1**; add per-app
-fast paths later only if something misbehaves.
+verify it worked, restore the previous contents. `AXSelectedText` works well in native Cocoa apps
+and fails in Chrome, Cursor, and Electron — exactly where these users live. Synthesize-copy is
+less code and better coverage. **No AX code in v1**; add per-app fast paths later only if
+something misbehaves.
+
+**Verification uses a sentinel, not the pasteboard's change count.** Confirmed during
+implementation: `changeCount` is a shared global counter, so anything else touching the clipboard
+while polling (another app, a clipboard-history tool) can bump it without the synthesized
+keystroke having done anything — a false positive. Writing a unique sentinel value first and
+checking whether the pasteboard holds something *other than* that sentinel afterward is
+unambiguous instead.
+
+**Terminal emulators don't respond to synthesize-copy at all — confirmed against real
+Terminal.app and Ghostty sessions, not a theoretical gap.** The synthetic Cmd+C posts cleanly, no
+error, but the pasteboard never changes even with real text selected — these apps implement their
+own keyboard handling for PTY passthrough rather than going through the Cocoa responder chain a
+synthetic key equivalent relies on (which is what Notes, Arc, and other Cocoa-text-view apps do
+use, and where synthesize-copy works correctly). When synthesis is confirmed to have failed, the
+backend falls back to reading whatever's already on the clipboard — picking up a manual Cmd+C the
+user pressed themselves, i.e. transparently degrading to the zero-permission flow for exactly the
+apps where the upgrade can't work, while every other app keeps one-key capture.
+
+**Freshness tracking lives in the backend, not the app layer, and is seeded at construction.**
+Both fallback (above) and the plain clipboard path need to distinguish "the user just copied
+something new" from "this is whatever happened to already be on the clipboard." A backend that
+only remembers its *previous* capture misses content that predates the app starting — an early
+implementation reported a stale sentence from an unrelated earlier clipboard action as a fresh
+capture the first time the hotkey was pressed. The fix: every backend hashes whatever's on the
+clipboard at construction time as its baseline, and `read_capture_text` only ever returns content
+whose hash differs from the last one it saw.
 
 **Focus model — three distinct behaviours:**
 

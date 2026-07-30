@@ -1,7 +1,9 @@
+use serde::Serialize;
+
 use crate::error::Result;
 
 /// Where a capture's text came from, when the backend can tell.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct SourceInfo {
     pub app_name: Option<String>,
     pub bundle_id: Option<String>,
@@ -10,7 +12,8 @@ pub struct SourceInfo {
 }
 
 /// How this backend currently reads capturable text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CaptureMode {
     /// Reads whatever's already on the clipboard. Needs no OS permission;
     /// the user presses copy themselves, then the hotkey. This is the
@@ -23,7 +26,7 @@ pub enum CaptureMode {
     SynthesizedCopy,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Capabilities {
     pub mode: CaptureMode,
     /// Whether SynthesizedCopy exists on this platform at all, independent
@@ -55,4 +58,16 @@ pub trait CaptureBackend: Send + Sync {
     /// it. `ClipboardOnly` backends generally can't tell which app the
     /// clipboard content came from and should return `Ok(None)`.
     fn front_app(&self) -> Result<Option<SourceInfo>>;
+
+    /// Whether a `None` from `read_capture_text` means "a platform security
+    /// feature is actively blocking synthetic input" rather than "nothing
+    /// was selected". Default `false`; only overridden where such a feature
+    /// exists (macOS's Secure Keyboard Entry, found via manual testing --
+    /// terminals that enable it silently swallow every synthesized
+    /// keystroke, which otherwise looks identical to an empty selection).
+    /// Lets callers report "can't reach this app" instead of a misleading
+    /// "nothing to capture" when that's not actually why it failed.
+    fn secure_input_blocked(&self) -> bool {
+        false
+    }
 }

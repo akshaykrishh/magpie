@@ -2,8 +2,9 @@ use std::sync::Mutex;
 
 use arboard::Clipboard;
 
-use crate::backend::{CaptureBackend, CaptureMode, Capabilities, SourceInfo};
+use crate::backend::{Capabilities, CaptureBackend, CaptureMode, SourceInfo};
 use crate::error::Result;
+use crate::freshness::FreshnessTracker;
 
 /// The universal, zero-permission capture path: read whatever is currently
 /// on the system clipboard. The user copies (Cmd/Ctrl+C) themselves, then
@@ -18,14 +19,24 @@ use crate::error::Result;
 /// polling and recording every clipboard change would make this a generic
 /// clipboard manager, which is a different, more invasive product than the
 /// hotkey-gated capture tool this is meant to be.
+///
+/// `read_capture_text` only ever returns content that's new since the last
+/// time it was checked (or since construction) -- see `FreshnessTracker`.
+/// Without that, pressing the hotkey without having copied anything new
+/// would silently re-capture whatever stale content happened to already be
+/// on the clipboard.
 pub struct ClipboardBackend {
     clipboard: Mutex<Clipboard>,
+    freshness: FreshnessTracker,
 }
 
 impl ClipboardBackend {
     pub fn new() -> Result<Self> {
+        let mut clipboard = Clipboard::new()?;
+        let initial = clipboard.get_text().ok();
         Ok(Self {
-            clipboard: Mutex::new(Clipboard::new()?),
+            clipboard: Mutex::new(clipboard),
+            freshness: FreshnessTracker::seeded_with(initial.as_deref()),
         })
     }
 }
@@ -40,48 +51,75 @@ impl CaptureBackend for ClipboardBackend {
 
     fn read_capture_text(&self) -> Result<Option<String>> {
         let mut clipboard = self.clipboard.lock().expect("clipboard mutex poisoned");
-        match clipboard.get_text() {
-            Ok(text) if text.is_empty() => Ok(None),
-            Ok(text) => Ok(Some(text)),
-            Err(arboard::Error::ContentNotAvailable) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        let text = match clipboard.get_text() {
+            Ok(text) => Some(text),
+            Err(arboard::Error::ContentNotAvailable) => None,
+            Err(e) => return Err(e.into()),
+        };
+        Ok(self.freshness.check(text))
     }
 
     fn front_app(&self) -> Result<Option<SourceInfo>> {
         // The clipboard doesn't record which app copied into it -- provenance
         // beyond "unknown" needs a platform-specific frontmost-app read,
-        // which is a native backend's job (see the macOS backend in the
-        // next milestone), not something a clipboard read can ever provide.
+        // which is a native backend's job (see MacosBackend), not something
+        // a clipboard read can ever provide.
         Ok(None)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use serial_test::serial;
+
     use super::*;
 
-    // These touch the real system clipboard, which crashes (SIGSEGV, not
-    // just flakiness) when two `Clipboard` instances race on the same
-    // NSPasteboard from different test threads -- reproduced while writing
-    // this. Kept as one sequential test rather than several, so a plain
-    // `cargo test` can't reintroduce the race by running them in parallel.
+    // Every test in this crate that touches the real system clipboard or
+    // any AppKit/Carbon API is `#[serial]`. Two `Clipboard` instances (or
+    // AppKit calls generally) racing on the same shared OS-level state from
+    // parallel test threads crashes the whole process -- reproduced twice
+    // while writing this crate, in two different modules, which is why this
+    // is enforced with a crate-wide lock (see `serial_test`'s docs: its
+    // default, argument-less `#[serial]` shares one implicit lock across the
+    // *entire* crate, not just within one file) rather than by manually
+    // remembering to keep tests merged or ordered -- that only worked until
+    // the next test that touched shared state was added anywhere else.
     #[test]
-    fn clipboard_backend_reads_and_reports_provenance() {
+    #[serial]
+    fn clipboard_backend_reads_reports_freshness_and_provenance() {
         let mut clipboard = Clipboard::new().unwrap();
 
-        clipboard.set_text("magpie test payload").unwrap();
+        // Content already present *before* construction must be treated as
+        // the baseline, not as a fresh capture -- this is the exact bug
+        // found testing against Terminal.app: stale leftover clipboard
+        // content getting reported as newly captured.
+        clipboard.set_text("stale, pre-existing content").unwrap();
         let backend = ClipboardBackend::new().unwrap();
+        assert_eq!(backend.read_capture_text().unwrap(), None);
+
+        // Genuinely new content reads as a fresh capture.
+        clipboard.set_text("magpie test payload").unwrap();
         assert_eq!(
             backend.read_capture_text().unwrap().as_deref(),
             Some("magpie test payload")
         );
 
-        clipboard.set_text("").unwrap();
+        // Checking again without an intervening copy is not fresh again.
         assert_eq!(backend.read_capture_text().unwrap(), None);
 
+        // An empty clipboard is nothing to capture, and doesn't disturb the
+        // remembered baseline.
+        clipboard.set_text("").unwrap();
+        assert_eq!(backend.read_capture_text().unwrap(), None);
+        clipboard.set_text("magpie test payload").unwrap();
+        assert_eq!(
+            backend.read_capture_text().unwrap(),
+            None,
+            "re-setting the same content the empty check didn't erase from memory must stay non-fresh"
+        );
+
         // The clipboard never carries provenance -- that's a native
-        // backend's job (macOS synthesize-copy, next milestone).
+        // backend's job (MacosBackend).
         assert_eq!(backend.front_app().unwrap(), None);
     }
 }
