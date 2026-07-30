@@ -6,23 +6,30 @@ Agents can read and write your queue over MCP.
 
 `magpie` is a working name, not final.
 
-**Status: pre-alpha.** Nothing here is usable yet. See [the design spec](docs/design.md) for the
-full plan.
+**Status: pre-alpha.** Nothing here is usable yet. See [the design document](docs/design.md) for
+the full architecture and roadmap.
 
 ## Why
 
 Working with AI means constantly collecting small things you don't want to lose — an answer
 worth keeping, a link, three follow-up prompts that occur to you while the current one is still
-generating. They scatter across tabs and apps. Existing tools in this space tend to be closed,
-Mac-only, and not integrated with anything. This project targets the same problem, but open
-source, cross-platform, and with an MCP server so Claude Code / Cursor agents can work the queue
-directly instead of it being a dead end only human hands can empty.
+generating. They scatter across tabs and apps: ChatGPT, Claude, Cursor, a browser tab, a
+terminal. magpie sits next to all of it, one hotkey away, and — unlike a plain clipboard manager
+— lets your agents read and drain the queue directly instead of it being a dead end only human
+hands can empty.
 
-## Current milestone: M0
+## Roadmap
 
-Proving the core interaction risk before building anything real on top of it: can a global
-hotkey show a toast **without stealing OS keyboard focus** from whatever app you're typing in?
-See `apps/desktop` — currently a throwaway harness for exactly that question, not the real app.
+Building toward a first real release (`v0.1`) in stages, each one a working, installable app:
+
+- **Capture core** — the stream, the `Now` working set, search, merge, tags, projects
+- **MCP server + CLI** — agents can read and write the queue over the Model Context Protocol
+- **Browser extension** — exact URL/page provenance with zero OS permissions
+- **Screenshots + OCR**
+- **Prompt templates and packs**
+
+See [docs/design.md](docs/design.md) for the full architecture, the reasoning behind each design
+decision, and the current status of each piece.
 
 ## License
 
