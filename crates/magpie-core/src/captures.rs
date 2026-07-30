@@ -14,7 +14,7 @@ pub struct NewSource {
     pub url: Option<String>,
 }
 
-fn capture_from_row(row: &Row) -> rusqlite::Result<Capture> {
+pub(crate) fn capture_from_row(row: &Row) -> rusqlite::Result<Capture> {
     Ok(Capture {
         id: row.get("id")?,
         body: row.get("body")?,
@@ -33,7 +33,8 @@ fn capture_from_row(row: &Row) -> rusqlite::Result<Capture> {
     })
 }
 
-const CAPTURE_COLUMNS: &str = "id, body, created_at, done_at, failed_reason, queue_pos, \
+pub(crate) const CAPTURE_COLUMNS: &str =
+    "id, body, created_at, done_at, failed_reason, queue_pos, \
      project_id, branch, lease_session, lease_client, lease_pid, lease_at, source_id, merged_into";
 
 impl Store {
@@ -80,7 +81,7 @@ impl Store {
         self.with_conn(|conn| {
             let sql = format!(
                 "SELECT {CAPTURE_COLUMNS} FROM captures
-                 WHERE (?1 = 0 OR project_id IS ?2)
+                 WHERE merged_into IS NULL AND (?1 = 0 OR project_id IS ?2)
                  ORDER BY created_at DESC, id DESC
                  LIMIT ?3 OFFSET ?4"
             );
@@ -223,7 +224,7 @@ impl Store {
     }
 }
 
-fn get_capture_tx(conn: &rusqlite::Connection, id: i64) -> Result<Capture> {
+pub(crate) fn get_capture_tx(conn: &rusqlite::Connection, id: i64) -> Result<Capture> {
     let sql = format!("SELECT {CAPTURE_COLUMNS} FROM captures WHERE id = ?1");
     conn.query_row(&sql, params![id], capture_from_row)
         .optional()?

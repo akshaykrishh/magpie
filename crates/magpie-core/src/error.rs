@@ -11,6 +11,9 @@ pub enum Error {
     #[error("project {0} not found")]
     ProjectNotFound(i64),
 
+    #[error("merge needs at least two captures")]
+    MergeNeedsAtLeastTwo,
+
     #[error("capture {0} is not leased")]
     NotLeased(i64),
 
@@ -19,6 +22,9 @@ pub enum Error {
 
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

@@ -1,5 +1,6 @@
 use rusqlite::{params, OptionalExtension};
 
+use crate::captures::{capture_from_row, CAPTURE_COLUMNS};
 use crate::error::Result;
 use crate::model::Tag;
 use crate::Store;
@@ -67,34 +68,16 @@ impl Store {
     /// Every capture currently tagged with `name`, most recent first.
     pub fn list_captures_by_tag(&self, name: &str) -> Result<Vec<crate::Capture>> {
         self.with_conn(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT c.id, c.body, c.created_at, c.done_at, c.failed_reason, c.queue_pos,
-                        c.project_id, c.branch, c.lease_session, c.lease_client, c.lease_pid,
-                        c.lease_at, c.source_id, c.merged_into
-                 FROM captures c
+            let sql = format!(
+                "SELECT c.{cols} FROM captures c
                  JOIN capture_tags ct ON ct.capture_id = c.id
                  JOIN tags t ON t.id = ct.tag_id
                  WHERE t.name = ?1
                  ORDER BY c.created_at DESC, c.id DESC",
-            )?;
-            let rows = stmt.query_map(params![name], |row| {
-                Ok(crate::Capture {
-                    id: row.get(0)?,
-                    body: row.get(1)?,
-                    created_at: row.get(2)?,
-                    done_at: row.get(3)?,
-                    failed_reason: row.get(4)?,
-                    queue_pos: row.get(5)?,
-                    project_id: row.get(6)?,
-                    branch: row.get(7)?,
-                    lease_session: row.get(8)?,
-                    lease_client: row.get(9)?,
-                    lease_pid: row.get(10)?,
-                    lease_at: row.get(11)?,
-                    source_id: row.get(12)?,
-                    merged_into: row.get(13)?,
-                })
-            })?;
+                cols = CAPTURE_COLUMNS.replace(", ", ", c."),
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params![name], capture_from_row)?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
     }
