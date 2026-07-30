@@ -33,6 +33,21 @@ export interface Tag {
   name: string;
 }
 
+export interface Template {
+  id: number;
+  title: string;
+  body: string;
+  created_at: string;
+}
+
+export interface AuditEntry {
+  id: number;
+  at: string;
+  actor: string;
+  action: string;
+  capture_id: number | null;
+}
+
 export type CaptureMode = "clipboard_only" | "synthesized_copy";
 
 export interface Capabilities {

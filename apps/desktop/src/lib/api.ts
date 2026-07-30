@@ -1,5 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Capabilities, Capture, Project, ProjectFilter, Tag } from "./types";
+import type {
+  AuditEntry,
+  Capabilities,
+  Capture,
+  Project,
+  ProjectFilter,
+  Tag,
+  Template,
+} from "./types";
 
 export const api = {
   listStream: (filter: ProjectFilter, limit = 200, offset = 0) =>
@@ -61,4 +69,22 @@ export const api = {
   captureCapabilities: () => invoke<Capabilities>("capture_capabilities"),
 
   openAccessibilitySettings: () => invoke<void>("open_accessibility_settings"),
+
+  listTemplates: () => invoke<Template[]>("list_templates"),
+
+  createTemplate: (title: string, body: string) =>
+    invoke<Template>("create_template", { title, body }),
+
+  updateTemplate: (id: number, title: string, body: string) =>
+    invoke<Template>("update_template", { id, title, body }),
+
+  deleteTemplate: (id: number) => invoke<void>("delete_template", { id }),
+
+  instantiateTemplate: (templateId: number, projectId: number | null) =>
+    invoke<Capture>("instantiate_template", { templateId, projectId }),
+
+  instantiateTemplateIntoMany: (templateId: number, projectIds: (number | null)[]) =>
+    invoke<Capture[]>("instantiate_template_into_many", { templateId, projectIds }),
+
+  listAudit: (limit = 50) => invoke<AuditEntry[]>("list_audit", { limit }),
 };

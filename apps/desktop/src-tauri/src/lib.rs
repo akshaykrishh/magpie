@@ -1,5 +1,6 @@
 mod capture_flow;
 mod commands;
+mod dead_pid_sweep;
 mod state;
 mod toast;
 mod tray;
@@ -54,6 +55,13 @@ pub fn run() {
             commands::export_markdown,
             commands::capture_capabilities,
             commands::open_accessibility_settings,
+            commands::list_templates,
+            commands::create_template,
+            commands::update_template,
+            commands::delete_template,
+            commands::instantiate_template,
+            commands::instantiate_template_into_many,
+            commands::list_audit,
         ])
         .on_window_event(|window, event| {
             if matches!(window.label(), "main" | "dock") {
@@ -65,6 +73,8 @@ pub fn run() {
                 .expect("could not determine a data directory for this platform");
             let store = magpie_core::Store::open(&db_path)
                 .unwrap_or_else(|e| panic!("failed to open database at {db_path:?}: {e}"));
+            dead_pid_sweep::sweep(&store);
+
             let backend = state::make_backend();
             app.manage(state::AppState::new(store, backend));
 

@@ -1,5 +1,5 @@
 use magpie_capture::Capabilities;
-use magpie_core::{Capture, Project, Tag};
+use magpie_core::{AuditEntry, Capture, Project, Tag, Template};
 use serde::Deserialize;
 use tauri::State;
 
@@ -168,6 +168,62 @@ pub fn export_markdown(state: State<AppState>) -> CmdResult<String> {
 #[tauri::command]
 pub fn capture_capabilities(state: State<AppState>) -> Capabilities {
     state.backend.capabilities()
+}
+
+#[tauri::command]
+pub fn list_templates(state: State<AppState>) -> CmdResult<Vec<Template>> {
+    map_err(state.store.list_templates())
+}
+
+#[tauri::command]
+pub fn create_template(state: State<AppState>, title: String, body: String) -> CmdResult<Template> {
+    map_err(state.store.create_template(&title, &body))
+}
+
+#[tauri::command]
+pub fn update_template(
+    state: State<AppState>,
+    id: i64,
+    title: String,
+    body: String,
+) -> CmdResult<Template> {
+    map_err(state.store.update_template(id, &title, &body))
+}
+
+#[tauri::command]
+pub fn delete_template(state: State<AppState>, id: i64) -> CmdResult<()> {
+    map_err(state.store.delete_template(id))
+}
+
+#[tauri::command]
+pub fn instantiate_template(
+    state: State<AppState>,
+    template_id: i64,
+    project_id: Option<i64>,
+) -> CmdResult<Capture> {
+    map_err(state.store.instantiate_template(template_id, project_id))
+}
+
+/// "Queue this everywhere" -- one template, instantiated into several
+/// projects' Now at once (see docs/design.md's multi-project section).
+#[tauri::command]
+pub fn instantiate_template_into_many(
+    state: State<AppState>,
+    template_id: i64,
+    project_ids: Vec<Option<i64>>,
+) -> CmdResult<Vec<Capture>> {
+    map_err(
+        state
+            .store
+            .instantiate_template_into_many(template_id, &project_ids),
+    )
+}
+
+/// What an agent did while you were away -- see docs/design.md "Agent
+/// trust": this is what turns that from a mystery into a scroll.
+#[tauri::command]
+pub fn list_audit(state: State<AppState>, limit: i64) -> CmdResult<Vec<AuditEntry>> {
+    map_err(state.store.list_audit(limit))
 }
 
 /// Opens System Settings directly to the Accessibility pane, rather than

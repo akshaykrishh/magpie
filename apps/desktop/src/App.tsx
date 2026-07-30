@@ -1,20 +1,31 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
 import { AddPromptInput } from "./components/AddPromptInput";
+import { AuditView } from "./components/AuditView";
 import { CaptureItem } from "./components/CaptureItem";
 import { MergeToolbar } from "./components/MergeToolbar";
 import { NowList } from "./components/NowList";
 import { PermissionBanner } from "./components/PermissionBanner";
 import { SearchBar } from "./components/SearchBar";
+import { TemplatesPanel } from "./components/TemplatesPanel";
 import { api } from "./lib/api";
 import { NOW_CHANGED_EVENT } from "./lib/events";
 import type { Capabilities, Capture } from "./lib/types";
+import { cn } from "./lib/utils";
 
 // Never on first run -- only once the user has felt the two-keystroke
 // friction a few times is the upgrade worth interrupting them for.
 const CAPTURES_BEFORE_UPGRADE_OFFER = 3;
 
+type View = "captures" | "templates" | "activity";
+const VIEWS: { id: View; label: string }[] = [
+  { id: "captures", label: "Captures" },
+  { id: "templates", label: "Templates" },
+  { id: "activity", label: "Activity" },
+];
+
 function App() {
+  const [view, setView] = useState<View>("captures");
   const [stream, setStream] = useState<Capture[]>([]);
   const [now, setNow] = useState<Capture[]>([]);
   const [query, setQuery] = useState("");
@@ -160,32 +171,65 @@ function App() {
           </div>
         </aside>
 
-        <section className="flex flex-1 flex-col gap-3 p-3">
-          <SearchBar value={query} onChange={setQuery} />
-          <MergeToolbar
-            count={selected.size}
-            onMerge={handleMerge}
-            onClear={() => setSelected(new Set())}
-          />
-          <div className="flex-1 overflow-y-auto">
-            {visibleStream.length === 0 ? (
-              <p className="px-3 py-6 text-center text-sm text-neutral-400 dark:text-neutral-600">
-                {searchResults ? "No matches." : "Nothing captured yet — try the hotkey."}
-              </p>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {visibleStream.map((capture) => (
-                  <CaptureItem
-                    key={capture.id}
-                    capture={capture}
-                    selected={selected.has(capture.id)}
-                    onToggleSelect={toggleSelect}
-                    onPromote={capture.queue_pos === null ? handlePromote : undefined}
-                  />
-                ))}
+        <section className="flex flex-1 flex-col overflow-hidden">
+          <nav className="flex gap-1 border-b border-neutral-200 px-3 pt-3 dark:border-neutral-800">
+            {VIEWS.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                onClick={() => setView(v.id)}
+                className={cn(
+                  "rounded-t-md px-3 py-1.5 text-sm",
+                  view === v.id
+                    ? "border-b-2 border-blue-500 font-medium text-blue-600 dark:text-blue-400"
+                    : "text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200",
+                )}
+              >
+                {v.label}
+              </button>
+            ))}
+          </nav>
+
+          {view === "captures" && (
+            <div className="flex flex-1 flex-col gap-3 overflow-hidden p-3">
+              <SearchBar value={query} onChange={setQuery} />
+              <MergeToolbar
+                count={selected.size}
+                onMerge={handleMerge}
+                onClear={() => setSelected(new Set())}
+              />
+              <div className="flex-1 overflow-y-auto">
+                {visibleStream.length === 0 ? (
+                  <p className="px-3 py-6 text-center text-sm text-neutral-400 dark:text-neutral-600">
+                    {searchResults ? "No matches." : "Nothing captured yet — try the hotkey."}
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {visibleStream.map((capture) => (
+                      <CaptureItem
+                        key={capture.id}
+                        capture={capture}
+                        selected={selected.has(capture.id)}
+                        onToggleSelect={toggleSelect}
+                        onPromote={capture.queue_pos === null ? handlePromote : undefined}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </div>
+          )}
+
+          {view === "templates" && (
+            <TemplatesPanel
+              onInstantiated={() => {
+                refreshNow();
+                emit(NOW_CHANGED_EVENT);
+              }}
+            />
+          )}
+
+          {view === "activity" && <AuditView />}
         </section>
       </div>
     </main>
