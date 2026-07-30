@@ -169,3 +169,30 @@ pub fn export_markdown(state: State<AppState>) -> CmdResult<String> {
 pub fn capture_capabilities(state: State<AppState>) -> Capabilities {
     state.backend.capabilities()
 }
+
+/// Opens System Settings directly to the Accessibility pane, rather than
+/// triggering AXIsProcessTrustedWithOptions' own prompt dialog -- that API
+/// needs a CFDictionary built with the kAXTrustedCheckOptionPrompt key,
+/// which means hand-rolling CFBoolean/CFDictionary construction with the
+/// same raw-CoreFoundation-ownership risk already avoided once for window
+/// titles (see magpie-capture's MacosBackend doc comment). Opening the pane
+/// directly needs none of that and gets the user to the same place: the
+/// toggle they have to flip either way.
+#[tauri::command]
+pub fn open_accessibility_settings(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_plugin_opener::OpenerExt;
+        app.opener()
+            .open_url(
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+                None::<String>,
+            )
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Ok(())
+    }
+}

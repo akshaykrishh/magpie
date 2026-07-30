@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window and the M0 spike toast window",
-  "windows": ["main", "toast"],
+  "description": "Capability for the main window, the toast, and the pinned dock",
+  "windows": ["main", "toast", "dock"],
   "permissions": [
     "core:default",
     "opener:default"

@@ -1,12 +1,18 @@
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
 import { AddPromptInput } from "./components/AddPromptInput";
 import { CaptureItem } from "./components/CaptureItem";
 import { MergeToolbar } from "./components/MergeToolbar";
 import { NowList } from "./components/NowList";
+import { PermissionBanner } from "./components/PermissionBanner";
 import { SearchBar } from "./components/SearchBar";
 import { api } from "./lib/api";
-import type { Capture } from "./lib/types";
+import { NOW_CHANGED_EVENT } from "./lib/events";
+import type { Capabilities, Capture } from "./lib/types";
+
+// Never on first run -- only once the user has felt the two-keystroke
+// friction a few times is the upgrade worth interrupting them for.
+const CAPTURES_BEFORE_UPGRADE_OFFER = 3;
 
 function App() {
   const [stream, setStream] = useState<Capture[]>([]);
@@ -14,6 +20,8 @@ function App() {
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Capture[] | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  const [permissionBannerDismissed, setPermissionBannerDismissed] = useState(false);
 
   const refreshStream = useCallback(() => {
     api.listStream({ kind: "all" }).then(setStream).catch(console.error);
@@ -26,12 +34,23 @@ function App() {
   useEffect(() => {
     refreshStream();
     refreshNow();
+    api.captureCapabilities().then(setCapabilities).catch(console.error);
 
-    const unlisten = listen("capture:added", () => {
+    const unlistenCapture = listen("capture:added", () => {
       refreshStream();
+      // Capability state itself doesn't change per-capture, but this is
+      // cheap and keeps it correct if the user grants Accessibility while
+      // the app is running (macOS doesn't require a relaunch for the
+      // AXIsProcessTrusted check to reflect a new grant).
+      api.captureCapabilities().then(setCapabilities).catch(console.error);
     });
+    // The pinned dock (a separate window) can promote/reorder/complete Now
+    // items independently -- this is what keeps this window's copy in sync
+    // with changes made over there, and vice versa (see handlers below).
+    const unlistenNow = listen(NOW_CHANGED_EVENT, refreshNow);
     return () => {
-      unlisten.then((f) => f());
+      unlistenCapture.then((f) => f());
+      unlistenNow.then((f) => f());
     };
   }, [refreshStream, refreshNow]);
 
@@ -59,11 +78,13 @@ function App() {
   async function handlePromote(id: number) {
     await api.promoteCapture(id);
     refreshNow();
+    emit(NOW_CHANGED_EVENT);
   }
 
   async function handleAddPrompt(body: string) {
     await api.addTypedCapture(body);
     refreshNow();
+    emit(NOW_CHANGED_EVENT);
   }
 
   async function handleMerge() {
@@ -87,65 +108,86 @@ function App() {
     });
     await api.reorderCapture(id, afterId);
     refreshNow();
+    emit(NOW_CHANGED_EVENT);
   }
 
   async function handleDone(id: number) {
     await api.markCaptureDone(id);
     refreshNow();
+    emit(NOW_CHANGED_EVENT);
   }
 
   async function handleDemote(id: number) {
     await api.demoteCapture(id);
     refreshNow();
     refreshStream();
+    emit(NOW_CHANGED_EVENT);
   }
 
   const visibleStream = searchResults ?? stream;
 
+  const showPermissionBanner =
+    !permissionBannerDismissed &&
+    capabilities?.mode === "clipboard_only" &&
+    capabilities.synthesized_copy_available &&
+    stream.length >= CAPTURES_BEFORE_UPGRADE_OFFER;
+
   return (
-    <main className="flex h-screen overflow-hidden">
-      <aside className="flex w-80 shrink-0 flex-col gap-3 border-r border-neutral-200 p-3 dark:border-neutral-800">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-          Now
-        </h2>
-        <AddPromptInput onAdd={handleAddPrompt} />
-        <div className="flex-1 overflow-y-auto">
-          <NowList
-            items={now}
-            onReorder={handleNowReorder}
-            onDone={handleDone}
-            onDemote={handleDemote}
+    <main className="flex h-screen flex-col overflow-hidden">
+      {showPermissionBanner && (
+        <div className="p-3 pb-0">
+          <PermissionBanner
+            onUpgrade={() => {
+              api.openAccessibilitySettings().catch(console.error);
+            }}
+            onDismiss={() => setPermissionBannerDismissed(true)}
           />
         </div>
-      </aside>
+      )}
+      <div className="flex flex-1 overflow-hidden">
+        <aside className="flex w-80 shrink-0 flex-col gap-3 border-r border-neutral-200 p-3 dark:border-neutral-800">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+            Now
+          </h2>
+          <AddPromptInput onAdd={handleAddPrompt} />
+          <div className="flex-1 overflow-y-auto">
+            <NowList
+              items={now}
+              onReorder={handleNowReorder}
+              onDone={handleDone}
+              onDemote={handleDemote}
+            />
+          </div>
+        </aside>
 
-      <section className="flex flex-1 flex-col gap-3 p-3">
-        <SearchBar value={query} onChange={setQuery} />
-        <MergeToolbar
-          count={selected.size}
-          onMerge={handleMerge}
-          onClear={() => setSelected(new Set())}
-        />
-        <div className="flex-1 overflow-y-auto">
-          {visibleStream.length === 0 ? (
-            <p className="px-3 py-6 text-center text-sm text-neutral-400 dark:text-neutral-600">
-              {searchResults ? "No matches." : "Nothing captured yet — try the hotkey."}
-            </p>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {visibleStream.map((capture) => (
-                <CaptureItem
-                  key={capture.id}
-                  capture={capture}
-                  selected={selected.has(capture.id)}
-                  onToggleSelect={toggleSelect}
-                  onPromote={capture.queue_pos === null ? handlePromote : undefined}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
+        <section className="flex flex-1 flex-col gap-3 p-3">
+          <SearchBar value={query} onChange={setQuery} />
+          <MergeToolbar
+            count={selected.size}
+            onMerge={handleMerge}
+            onClear={() => setSelected(new Set())}
+          />
+          <div className="flex-1 overflow-y-auto">
+            {visibleStream.length === 0 ? (
+              <p className="px-3 py-6 text-center text-sm text-neutral-400 dark:text-neutral-600">
+                {searchResults ? "No matches." : "Nothing captured yet — try the hotkey."}
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {visibleStream.map((capture) => (
+                  <CaptureItem
+                    key={capture.id}
+                    capture={capture}
+                    selected={selected.has(capture.id)}
+                    onToggleSelect={toggleSelect}
+                    onPromote={capture.queue_pos === null ? handlePromote : undefined}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
     </main>
   );
 }

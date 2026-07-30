@@ -20,6 +20,7 @@ export default defineConfig(async () => ({
       input: {
         main: resolve(import.meta.dirname, "index.html"),
         toast: resolve(import.meta.dirname, "toast.html"),
+        dock: resolve(import.meta.dirname, "dock.html"),
       },
     },
   },

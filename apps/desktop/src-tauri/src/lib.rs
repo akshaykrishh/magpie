@@ -2,6 +2,7 @@ mod capture_flow;
 mod commands;
 mod state;
 mod toast;
+mod tray;
 
 use tauri::Manager;
 use tauri_plugin_global_shortcut::ShortcutState;
@@ -52,7 +53,13 @@ pub fn run() {
             commands::export_json,
             commands::export_markdown,
             commands::capture_capabilities,
+            commands::open_accessibility_settings,
         ])
+        .on_window_event(|window, event| {
+            if matches!(window.label(), "main" | "dock") {
+                tray::hide_instead_of_close(window, event);
+            }
+        })
         .setup(|app| {
             let db_path = magpie_core::default_db_path()
                 .expect("could not determine a data directory for this platform");
@@ -61,7 +68,12 @@ pub fn run() {
             let backend = state::make_backend();
             app.manage(state::AppState::new(store, backend));
 
+            // Menu-bar-resident utility: no Dock icon, no Cmd+Tab entry.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             toast::init_toast_panel(app.handle());
+            tray::init_tray(app.handle())?;
 
             Ok(())
         })

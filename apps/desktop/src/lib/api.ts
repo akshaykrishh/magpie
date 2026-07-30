@@ -59,4 +59,6 @@ export const api = {
   exportMarkdown: () => invoke<string>("export_markdown"),
 
   captureCapabilities: () => invoke<Capabilities>("capture_capabilities"),
+
+  openAccessibilitySettings: () => invoke<void>("open_accessibility_settings"),
 };

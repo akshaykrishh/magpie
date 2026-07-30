@@ -13,9 +13,11 @@
     "windows": [
       {
         "label": "main",
-        "title": "magpie — M0 focus spike",
-        "width": 640,
-        "height": 420
+        "title": "magpie",
+        "width": 960,
+        "height": 640,
+        "minWidth": 640,
+        "minHeight": 400
       },
       {
         "label": "toast",
@@ -31,6 +33,20 @@
         "resizable": false,
         "shadow": false,
         "center": true
+      },
+      {
+        "label": "dock",
+        "title": "magpie — Now",
+        "url": "dock.html",
+        "width": 300,
+        "height": 420,
+        "minWidth": 220,
+        "minHeight": 200,
+        "visible": false,
+        "decorations": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": true
       }
     ],
     "security": {
