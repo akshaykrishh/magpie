@@ -59,7 +59,7 @@ export function TemplatesPanel({ onInstantiated }: TemplatesPanelProps) {
         <button
           type="button"
           onClick={() => startEdit("new")}
-          className="flex items-center gap-1 rounded-md bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700"
+          className="flex items-center gap-1 rounded-md bg-slate-teal px-2 py-1 text-xs text-white hover:opacity-90"
         >
           <Plus size={14} />
           New
@@ -72,14 +72,14 @@ export function TemplatesPanel({ onInstantiated }: TemplatesPanelProps) {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Title"
-            className="rounded-md border border-neutral-200 bg-transparent px-2 py-1 text-sm focus:border-blue-400 focus:outline-none dark:border-neutral-700"
+            className="rounded-md border border-neutral-200 bg-transparent px-2 py-1 text-sm focus:border-slate-teal focus:outline-none dark:border-neutral-700"
           />
           <textarea
             value={body}
             onChange={(e) => setBody(e.target.value)}
             placeholder="Prompt body"
             rows={4}
-            className="rounded-md border border-neutral-200 bg-transparent px-2 py-1 text-sm focus:border-blue-400 focus:outline-none dark:border-neutral-700"
+            className="rounded-md border border-neutral-200 bg-transparent px-2 py-1 text-sm focus:border-slate-teal focus:outline-none dark:border-neutral-700"
           />
           <div className="flex justify-end gap-2">
             <button
@@ -93,7 +93,7 @@ export function TemplatesPanel({ onInstantiated }: TemplatesPanelProps) {
               type="button"
               onClick={save}
               disabled={!title.trim() || !body.trim()}
-              className="rounded-md bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-40"
+              className="rounded-md bg-slate-teal px-2 py-1 text-xs text-white hover:opacity-90 disabled:opacity-40"
             >
               Save
             </button>

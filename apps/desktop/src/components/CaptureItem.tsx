@@ -34,7 +34,7 @@ export function CaptureItem({
       className={cn(
         "group flex items-start gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2.5",
         "dark:border-neutral-800 dark:bg-neutral-900",
-        selected && "border-blue-400 ring-1 ring-blue-400 dark:border-blue-500",
+        selected && "border-slate-teal ring-1 ring-slate-teal dark:border-slate-teal-light dark:ring-slate-teal-light",
         className,
       )}
     >
@@ -53,7 +53,7 @@ export function CaptureItem({
           type="checkbox"
           checked={selected}
           onChange={() => onToggleSelect(capture.id)}
-          className="mt-1 size-4 shrink-0 accent-blue-500"
+          className="mt-1 size-4 shrink-0 accent-slate-teal"
         />
       )}
 
@@ -82,7 +82,7 @@ export function CaptureItem({
             type="button"
             title="Promote to Now"
             onClick={() => onPromote(capture.id)}
-            className="rounded p-1.5 text-neutral-400 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950"
+            className="rounded p-1.5 text-neutral-400 hover:bg-slate-teal/10 hover:text-slate-teal dark:hover:bg-slate-teal-light/15"
           >
             <ArrowUpToLine size={16} />
           </button>

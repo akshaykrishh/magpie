@@ -1,4 +1,5 @@
 use tauri::{
+    image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager,
@@ -6,6 +7,13 @@ use tauri::{
 
 const MAIN_LABEL: &str = "main";
 const DOCK_LABEL: &str = "dock";
+
+/// A monochrome "template" image, not the full-color app icon -- macOS
+/// tints template images automatically to match the current menu bar
+/// appearance (light/dark, plus the "reduce transparency"/tinted-menu-bar
+/// cases a hardcoded color would get wrong). 44x44px (the @2x rendition of
+/// a 22pt menu bar icon) for a crisp result on Retina displays.
+const TRAY_ICON_TEMPLATE: &[u8] = include_bytes!("../icons/tray-icon-template.png");
 
 /// A menu-bar icon that toggles the main window and the pinned dock, plus
 /// Quit -- this is what makes closing either window sensible (see
@@ -17,8 +25,11 @@ pub fn init_tray(app: &AppHandle) -> tauri::Result<()> {
     let quit = PredefinedMenuItem::quit(app, Some("Quit magpie"))?;
     let menu = Menu::with_items(app, &[&show, &toggle_dock, &quit])?;
 
+    let icon = Image::from_bytes(TRAY_ICON_TEMPLATE)?;
+
     TrayIconBuilder::new()
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(icon)
+        .icon_as_template(true)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {

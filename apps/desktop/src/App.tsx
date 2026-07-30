@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AddPromptInput } from "./components/AddPromptInput";
 import { AuditView } from "./components/AuditView";
 import { CaptureItem } from "./components/CaptureItem";
+import { Logo, Wordmark } from "./components/Logo";
 import { MergeToolbar } from "./components/MergeToolbar";
 import { NowList } from "./components/NowList";
 import { PermissionBanner } from "./components/PermissionBanner";
@@ -145,6 +146,10 @@ function App() {
 
   return (
     <main className="flex h-screen flex-col overflow-hidden">
+      <header className="flex shrink-0 items-center gap-1.5 border-b border-neutral-200 px-3 py-2 dark:border-neutral-800">
+        <Logo size={18} />
+        <Wordmark className="text-sm font-bold text-ink dark:text-neutral-100" />
+      </header>
       {showPermissionBanner && (
         <div className="p-3 pb-0">
           <PermissionBanner
@@ -181,7 +186,7 @@ function App() {
                 className={cn(
                   "rounded-t-md px-3 py-1.5 text-sm",
                   view === v.id
-                    ? "border-b-2 border-blue-500 font-medium text-blue-600 dark:text-blue-400"
+                    ? "border-b-2 border-slate-teal font-medium text-slate-teal dark:border-slate-teal-light dark:text-slate-teal-light"
                     : "text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200",
                 )}
               >
