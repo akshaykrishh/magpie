@@ -14,11 +14,14 @@ pub enum Error {
     #[error("merge needs at least two captures")]
     MergeNeedsAtLeastTwo,
 
-    #[error("capture {0} is not leased")]
+    #[error("template {0} not found")]
+    TemplateNotFound(i64),
+
+    #[error("capture {0} is not currently leased")]
     NotLeased(i64),
 
-    #[error("capture {0} is leased by a different session")]
-    LeaseMismatch(i64),
+    #[error("capture {0} is not leased by session {1}")]
+    LeaseMismatch(i64, String),
 
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),

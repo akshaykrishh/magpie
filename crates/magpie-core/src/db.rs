@@ -76,6 +76,15 @@ impl Store {
         let conn = self.conn.lock().expect("db mutex poisoned");
         f(&conn)
     }
+
+    /// Like `with_conn`, but with a mutable borrow -- needed for
+    /// `Connection::transaction_with_behavior`, which requires `&mut
+    /// Connection` (unlike `unchecked_transaction`, which only needs `&self`
+    /// but can't select a `TransactionBehavior`, always starting deferred).
+    pub(crate) fn with_conn_mut<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
+        let mut conn = self.conn.lock().expect("db mutex poisoned");
+        f(&mut conn)
+    }
 }
 
 fn migrate(conn: &Connection) -> Result<()> {
