@@ -7,6 +7,7 @@ pub struct Project {
     pub remote_url: Option<String>,
     pub common_git_dir: Option<String>,
     pub created_at: String,
+    pub last_active_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

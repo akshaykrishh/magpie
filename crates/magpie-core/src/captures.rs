@@ -219,6 +219,9 @@ impl Store {
                 "UPDATE captures SET project_id = ?1 WHERE id = ?2",
                 params![project_id, id],
             )?;
+            if let Some(project_id) = project_id {
+                crate::projects::touch_project_active_tx(conn, project_id)?;
+            }
             get_capture_tx(conn, id)
         })
     }
@@ -366,5 +369,19 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let err = store.get_capture(999).unwrap_err();
         assert!(matches!(err, Error::CaptureNotFound(999)));
+    }
+
+    #[test]
+    fn assigning_a_capture_touches_its_project_recency() {
+        let store = Store::open_in_memory().unwrap();
+        let proj = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        let capture = store.capture("something", None).unwrap();
+
+        store.assign_project(capture.id, Some(proj.id)).unwrap();
+
+        let refreshed = store.get_project(proj.id).unwrap();
+        assert!(refreshed.last_active_at.is_some());
     }
 }
