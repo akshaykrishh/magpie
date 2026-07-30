@@ -5,6 +5,7 @@ members = [
     "crates/magpie-core",
     "crates/magpie-capture",
     "crates/magpie-mcp",
+    "crates/magpie-cli",
 ]
 
 [workspace.package]

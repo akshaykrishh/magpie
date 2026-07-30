@@ -1,0 +1,18 @@
+[package]
+name = "magpie-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Command-line interface for magpie"
+
+[[bin]]
+name = "magpie"
+path = "src/main.rs"
+
+[dependencies]
+magpie-core.workspace = true
+magpie-mcp.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
