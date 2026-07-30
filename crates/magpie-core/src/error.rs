@@ -8,6 +8,9 @@ pub enum Error {
     #[error("capture {0} not found")]
     CaptureNotFound(i64),
 
+    #[error("project {0} not found")]
+    ProjectNotFound(i64),
+
     #[error("capture {0} is not leased")]
     NotLeased(i64),
 
