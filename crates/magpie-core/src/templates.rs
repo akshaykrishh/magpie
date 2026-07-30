@@ -1,18 +1,25 @@
+use std::collections::HashMap;
+
 use rusqlite::{params, OptionalExtension};
 
 use crate::db::now_iso;
 use crate::error::{Error, Result};
 use crate::model::{Capture, Template};
+use crate::placeholders::{extract_variables, substitute_variables};
 use crate::Store;
 
-const TEMPLATE_COLUMNS: &str = "id, title, body, created_at";
+pub(crate) const TEMPLATE_COLUMNS: &str =
+    "id, title, body, created_at, description, variables_json, pack_id";
 
-fn template_from_row(row: &rusqlite::Row) -> rusqlite::Result<Template> {
+pub(crate) fn template_from_row(row: &rusqlite::Row) -> rusqlite::Result<Template> {
     Ok(Template {
         id: row.get("id")?,
         title: row.get("title")?,
         body: row.get("body")?,
         created_at: row.get("created_at")?,
+        description: row.get("description")?,
+        variables_json: row.get("variables_json")?,
+        pack_id: row.get("pack_id")?,
     })
 }
 
@@ -62,16 +69,40 @@ impl Store {
     /// the given project's Now. The template itself is untouched and stays
     /// in the library -- "Run on nexa-erp" must not consume the template,
     /// since the whole point is running the same prompt again elsewhere
-    /// later (see docs/design.md "one stream, one working set").
+    /// later (see docs/design.md "one stream, one working set"). Equivalent
+    /// to `instantiate_template_with_values` with no values supplied --
+    /// harmless for a template with no `{{placeholders}}`, since
+    /// substitution with nothing to substitute is a no-op.
     pub fn instantiate_template(
         &self,
         template_id: i64,
         project_id: Option<i64>,
     ) -> Result<Capture> {
+        self.instantiate_template_with_values(template_id, project_id, &HashMap::new())
+    }
+
+    /// Same as `instantiate_template`, but fills in the template's
+    /// `{{name}}` placeholders from `values` first. A placeholder with no
+    /// entry in `values` is left literal in the resulting capture -- see
+    /// `placeholders::substitute_variables`.
+    pub fn instantiate_template_with_values(
+        &self,
+        template_id: i64,
+        project_id: Option<i64>,
+        values: &HashMap<String, String>,
+    ) -> Result<Capture> {
         let template = self.get_template(template_id)?;
-        let capture = self.capture(&template.body, None)?;
+        let body = substitute_variables(&template.body, values);
+        let capture = self.capture(&body, None)?;
         self.assign_project(capture.id, project_id)?;
         self.promote(capture.id)
+    }
+
+    /// The `{{name}}` placeholders a template's body references -- what a
+    /// fill-in form needs to ask for before instantiating it.
+    pub fn template_variables(&self, template_id: i64) -> Result<Vec<String>> {
+        let template = self.get_template(template_id)?;
+        Ok(extract_variables(&template.body))
     }
 
     /// Same template, instantiated into several projects at once -- the
@@ -100,6 +131,54 @@ fn get_template_tx(conn: &rusqlite::Connection, id: i64) -> Result<Template> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn template_variables_lists_placeholders_in_the_body() {
+        let store = Store::open_in_memory().unwrap();
+        let t = store
+            .create_template(
+                "Fix a test",
+                "Investigate why {{test_name}} fails in {{package}}",
+            )
+            .unwrap();
+        assert_eq!(
+            store.template_variables(t.id).unwrap(),
+            vec!["test_name", "package"]
+        );
+    }
+
+    #[test]
+    fn instantiate_with_values_substitutes_placeholders() {
+        let store = Store::open_in_memory().unwrap();
+        let t = store
+            .create_template("Fix a test", "Investigate why {{test_name}} fails")
+            .unwrap();
+
+        let mut values = HashMap::new();
+        values.insert("test_name".to_string(), "test_login_flow".to_string());
+        let capture = store
+            .instantiate_template_with_values(t.id, None, &values)
+            .unwrap();
+
+        assert_eq!(capture.body, "Investigate why test_login_flow fails");
+        // The template itself keeps its placeholder, unrendered -- only the
+        // instantiated capture gets the filled-in text.
+        assert_eq!(
+            store.get_template(t.id).unwrap().body,
+            "Investigate why {{test_name}} fails"
+        );
+    }
+
+    #[test]
+    fn instantiate_without_values_leaves_placeholders_literal() {
+        let store = Store::open_in_memory().unwrap();
+        let t = store
+            .create_template("Fix a test", "Investigate why {{test_name}} fails")
+            .unwrap();
+
+        let capture = store.instantiate_template(t.id, None).unwrap();
+        assert_eq!(capture.body, "Investigate why {{test_name}} fails");
+    }
 
     #[test]
     fn create_update_delete_round_trip() {

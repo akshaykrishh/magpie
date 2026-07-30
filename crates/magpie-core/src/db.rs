@@ -22,6 +22,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0002_screenshots",
         include_str!("../migrations/0002_screenshots.sql"),
     ),
+    ("0003_packs", include_str!("../migrations/0003_packs.sql")),
 ];
 
 /// `~/Library/Application Support/magpie/magpie.db` on macOS,

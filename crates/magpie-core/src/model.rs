@@ -67,6 +67,23 @@ pub struct Template {
     pub title: String,
     pub body: String,
     pub created_at: String,
+    pub description: Option<String>,
+    /// A pack manifest's declared metadata for this template's `{{name}}`
+    /// placeholders, serialized as JSON (`{name: {description, default}}`).
+    /// `None` for templates without any declared variable metadata --
+    /// substitution itself never depends on this, only the fill-in form's
+    /// labels do (see `docs/design.md` for the manifest shape).
+    pub variables_json: Option<String>,
+    pub pack_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Pack {
+    pub id: i64,
+    pub source_url: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub imported_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

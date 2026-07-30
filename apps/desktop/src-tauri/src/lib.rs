@@ -18,6 +18,9 @@ const SCREENSHOT_HOTKEY: &str = "CommandOrControl+Shift+Alt+M";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Only reassigned on macOS (below) -- on every other target this
+    // binding is never mutated, which clippy correctly flags there.
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut builder = tauri::Builder::default();
 
     #[cfg(target_os = "macos")]
