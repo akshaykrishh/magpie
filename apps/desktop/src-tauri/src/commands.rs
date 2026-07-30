@@ -209,6 +209,29 @@ pub fn instantiate_template(
     map_err(state.store.instantiate_template(template_id, project_id))
 }
 
+/// The `{{name}}` placeholders a template's body references -- the GUI
+/// asks for this before showing the "Run" fill-in form, rather than
+/// re-deriving it client-side, so the server's parsing is always the one
+/// source of truth for what counts as a placeholder.
+#[tauri::command]
+pub fn get_template_variables(state: State<AppState>, template_id: i64) -> CmdResult<Vec<String>> {
+    map_err(state.store.template_variables(template_id))
+}
+
+#[tauri::command]
+pub fn instantiate_template_with_values(
+    state: State<AppState>,
+    template_id: i64,
+    project_id: Option<i64>,
+    values: std::collections::HashMap<String, String>,
+) -> CmdResult<Capture> {
+    map_err(
+        state
+            .store
+            .instantiate_template_with_values(template_id, project_id, &values),
+    )
+}
+
 /// "Queue this everywhere" -- one template, instantiated into several
 /// projects' Now at once (see docs/design.md's multi-project section).
 #[tauri::command]

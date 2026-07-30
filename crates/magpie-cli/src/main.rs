@@ -4,6 +4,8 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use magpie_core::Store;
 
+mod pack_source;
+
 #[derive(Parser)]
 #[command(name = "magpie", about = "Capture queue for AI-assisted work", version)]
 struct Cli {
@@ -52,6 +54,28 @@ enum Command {
 
     /// Run the MCP server over stdio (what an agent host actually spawns)
     ServeMcp,
+
+    /// Prompt packs -- shared, git-hosted collections of templates. Named
+    /// as its own subcommand group rather than reusing `add` (as sketched
+    /// in the original design doc) since that name was already taken by
+    /// plain-text capture -- `magpie add github:...` and `magpie add
+    /// "some text I copied"` would otherwise be indistinguishable.
+    #[command(subcommand)]
+    Pack(PackCommand),
+}
+
+#[derive(Subcommand)]
+enum PackCommand {
+    /// Import (or re-import) a pack -- `github:owner/repo`, a full git URL,
+    /// or a local directory/file (mainly for testing a pack before
+    /// publishing it)
+    Add { source: String },
+
+    /// List imported packs
+    List,
+
+    /// List one pack's templates
+    Templates { pack_id: i64 },
 }
 
 #[tokio::main]
@@ -129,6 +153,41 @@ async fn main() -> Result<()> {
 
         Command::ServeMcp => {
             magpie_mcp::serve_stdio(Arc::new(store)).await?;
+        }
+
+        Command::Pack(PackCommand::Add { source }) => {
+            let (source_url, parsed) = pack_source::fetch(&source)?;
+            let (pack, templates) = store.import_pack(&source_url, &parsed)?;
+            let plural = if templates.len() == 1 { "" } else { "s" };
+            println!(
+                "imported pack #{} \"{}\" ({} prompt{plural})",
+                pack.id,
+                pack.name,
+                templates.len()
+            );
+            for t in &templates {
+                println!("  #{:<5} {}", t.id, t.title);
+            }
+        }
+
+        Command::Pack(PackCommand::List) => {
+            let packs = store.list_packs()?;
+            if packs.is_empty() {
+                println!("(no packs imported)");
+            }
+            for p in packs {
+                println!("#{:<3} {}  ({})", p.id, p.name, p.source_url);
+            }
+        }
+
+        Command::Pack(PackCommand::Templates { pack_id }) => {
+            let templates = store.list_pack_templates(pack_id)?;
+            if templates.is_empty() {
+                println!("(no templates)");
+            }
+            for t in templates {
+                println!("#{:<5} {}", t.id, t.title);
+            }
         }
     }
 

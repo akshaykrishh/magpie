@@ -335,10 +335,25 @@ rather than a hand-rolled X11 selection overlay. OCR shells out to `tesseract` i
 the `aarch64-unknown-linux-gnu` target but has not run on a real Linux desktop -- see the note at
 the top of `magpie-capture/src/linux.rs`.
 
-### M5 — git prompt packs → `v1.0`
+### M5 — git prompt packs → `v1.0` (done)
 
-`magpie add github:someone/agent-prompts`, manifest at `magpie.json`. Packs are git repos — no
-server, no accounts, no hosting, no moderation to run.
+`magpie pack add github:someone/agent-prompts`, manifest at `magpie.json`. Packs are git repos —
+no server, no accounts, no hosting, no moderation to run. Named `pack add` rather than the `add`
+sketched originally: that name was already taken by plain-text capture, and `magpie add
+github:...` versus `magpie add "some text I copied"` would otherwise be indistinguishable.
+`pack add` also accepts a full git URL or a local directory/file directly, the latter mainly for
+testing a pack before publishing it.
+
+A manifest prompt can declare `{{name}}` placeholders in its body, with optional per-variable
+`description`/`default` metadata in a `variables` object. Instantiating a template with unfilled
+placeholders leaves them as literal text rather than silently blanking them out — an honest signal
+that something wasn't filled in, not a smaller version of what the prompt actually said. The GUI
+shows a small fill-in form before running a template that has any; the CLI's `pack add` and plain
+`instantiate_template` calls leave placeholders unfilled unless a caller explicitly supplies
+values.
+
+Re-running `pack add` against the same source updates that pack's templates in place (matched by
+title) rather than duplicating them — pulling a pack's latest changes is just importing it again.
 
 ## Open-source scaffolding
 

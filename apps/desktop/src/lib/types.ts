@@ -38,6 +38,9 @@ export interface Template {
   title: string;
   body: string;
   created_at: string;
+  description: string | null;
+  variables_json: string | null;
+  pack_id: number | null;
 }
 
 export interface AuditEntry {

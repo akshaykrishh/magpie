@@ -5,9 +5,11 @@ for people who work across ChatGPT, Claude, Cursor, and agent CLIs. Runs on macO
 Agents can read and write your queue over MCP.
 
 **Status: early development.** The capture core, MCP server, and CLI work end-to-end on macOS.
-Linux support is planned but not yet verified, and there are no packaged releases yet — build
-from source (see Development below). See [the design document](docs/design.md) for the full
-architecture and roadmap.
+On Linux, the full test suite runs and passes in CI on every push, but nobody has yet run the
+actual desktop app on a real Linux machine — that first-hand verification is still outstanding.
+No signed releases yet; CI produces unsigned build artifacts on every push (see Development
+below to build from source in the meantime). See [the design document](docs/design.md) for the
+full architecture and roadmap.
 
 ## Why
 
@@ -27,8 +29,10 @@ Building toward a first packaged release in stages:
   reusable prompt templates (done)
 - **Screenshots + OCR** — region capture, searchable via on-device text recognition (done on
   macOS; implemented on Linux but not yet verified on real hardware)
-- **Packaging** — signed, installable builds for macOS and Linux
-- **Prompt packs** — shared, git-hosted collections of prompts
+- **Prompt packs** — shared, git-hosted collections of templates, with fill-in-the-blank prompts
+  (done)
+- **Packaging** — CI builds unsigned installers for macOS and Linux on every push (done); real
+  code signing and notarization are still a manual step (see docs/design.md "Signing")
 
 See [docs/design.md](docs/design.md) for the full architecture, the reasoning behind each design
 decision, and the current status of each piece.

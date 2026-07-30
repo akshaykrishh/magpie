@@ -87,6 +87,15 @@ export const api = {
   instantiateTemplateIntoMany: (templateId: number, projectIds: (number | null)[]) =>
     invoke<Capture[]>("instantiate_template_into_many", { templateId, projectIds }),
 
+  getTemplateVariables: (templateId: number) =>
+    invoke<string[]>("get_template_variables", { templateId }),
+
+  instantiateTemplateWithValues: (
+    templateId: number,
+    projectId: number | null,
+    values: Record<string, string>,
+  ) => invoke<Capture>("instantiate_template_with_values", { templateId, projectId, values }),
+
   listAudit: (limit = 50) => invoke<AuditEntry[]>("list_audit", { limit }),
 
   getCaptureBlob: (captureId: number) =>

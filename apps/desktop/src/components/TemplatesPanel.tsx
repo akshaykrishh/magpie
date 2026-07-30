@@ -45,8 +45,16 @@ export function TemplatesPanel({ onInstantiated }: TemplatesPanelProps) {
     refresh();
   }
 
-  async function instantiate(templateId: number, projectId: number | null) {
-    await api.instantiateTemplate(templateId, projectId);
+  async function instantiate(
+    templateId: number,
+    projectId: number | null,
+    values?: Record<string, string>,
+  ) {
+    if (values) {
+      await api.instantiateTemplateWithValues(templateId, projectId, values);
+    } else {
+      await api.instantiateTemplate(templateId, projectId);
+    }
     onInstantiated();
   }
 
@@ -116,12 +124,26 @@ export function TemplatesPanel({ onInstantiated }: TemplatesPanelProps) {
             projects={projects}
             onEdit={() => startEdit(t)}
             onDelete={() => remove(t.id)}
-            onInstantiate={(projectId) => instantiate(t.id, projectId)}
+            onInstantiate={(projectId, values) => instantiate(t.id, projectId, values)}
           />
         ))}
       </div>
     </div>
   );
+}
+
+interface VariableMeta {
+  description?: string;
+  default?: string;
+}
+
+function parseVariableMeta(json: string | null): Record<string, VariableMeta> {
+  if (!json) return {};
+  try {
+    return JSON.parse(json);
+  } catch {
+    return {};
+  }
 }
 
 function TemplateCard({
@@ -135,9 +157,28 @@ function TemplateCard({
   projects: Project[];
   onEdit: () => void;
   onDelete: () => void;
-  onInstantiate: (projectId: number | null) => void;
+  onInstantiate: (projectId: number | null, values?: Record<string, string>) => void;
 }) {
   const [targetProject, setTargetProject] = useState<string>("");
+  // null = not checked yet, [] = checked and has none, string[] = needs filling in.
+  const [variables, setVariables] = useState<string[] | null>(null);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const variableMeta = parseVariableMeta(template.variables_json);
+
+  async function handleRunClick() {
+    if (variables === null) {
+      const found = await api.getTemplateVariables(template.id);
+      if (found.length === 0) {
+        onInstantiate(targetProject ? Number(targetProject) : null);
+      } else {
+        setVariables(found);
+      }
+      return;
+    }
+    onInstantiate(targetProject ? Number(targetProject) : null, values);
+    setVariables(null);
+    setValues({});
+  }
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
@@ -146,6 +187,11 @@ function TemplateCard({
           <p className="truncate text-sm font-medium text-neutral-800 dark:text-neutral-200">
             {template.title}
           </p>
+          {template.description && (
+            <p className="mt-0.5 truncate text-xs text-neutral-400 dark:text-neutral-500">
+              {template.description}
+            </p>
+          )}
           <p className="mt-0.5 line-clamp-2 text-xs text-neutral-500 dark:text-neutral-400">
             {template.body}
           </p>
@@ -167,6 +213,25 @@ function TemplateCard({
           </button>
         </div>
       </div>
+
+      {variables && variables.length > 0 && (
+        <div className="flex flex-col gap-1.5 rounded-md border border-slate-teal/30 bg-slate-teal/5 p-2 dark:border-slate-teal-light/30 dark:bg-slate-teal-light/10">
+          {variables.map((name) => (
+            <label key={name} className="flex flex-col gap-0.5 text-xs">
+              <span className="text-neutral-500 dark:text-neutral-400">
+                {variableMeta[name]?.description ?? name}
+              </span>
+              <input
+                value={values[name] ?? variableMeta[name]?.default ?? ""}
+                onChange={(e) => setValues((prev) => ({ ...prev, [name]: e.target.value }))}
+                placeholder={name}
+                className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs focus:border-slate-teal focus:outline-none dark:border-neutral-700 dark:bg-neutral-900"
+              />
+            </label>
+          ))}
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         <select
           value={targetProject}
@@ -180,13 +245,25 @@ function TemplateCard({
             </option>
           ))}
         </select>
+        {variables && variables.length > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              setVariables(null);
+              setValues({});
+            }}
+            className="rounded-md px-2 py-1 text-xs text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          >
+            Cancel
+          </button>
+        )}
         <button
           type="button"
-          onClick={() => onInstantiate(targetProject ? Number(targetProject) : null)}
+          onClick={handleRunClick}
           className="flex items-center gap-1 rounded-md bg-neutral-800 px-2 py-1 text-xs text-white hover:bg-neutral-700 dark:bg-neutral-700 dark:hover:bg-neutral-600"
         >
           <Play size={12} />
-          Run
+          {variables && variables.length > 0 ? "Run with these values" : "Run"}
         </button>
       </div>
     </div>
