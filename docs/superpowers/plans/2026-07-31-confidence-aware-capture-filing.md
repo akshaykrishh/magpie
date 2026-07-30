@@ -386,8 +386,8 @@ mod tests {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test -p magpie-desktop guess_`
-Expected: FAIL to compile — `ToastPayload` and `guess_toast_payload` don't exist yet. (Confirm the actual package name of `apps/desktop/src-tauri` via its `Cargo.toml` `[package].name` if `magpie-desktop` doesn't match — it's whatever that file declares.)
+Run: `cargo test -p desktop guess_`
+Expected: FAIL to compile — `ToastPayload` and `guess_toast_payload` don't exist yet. (The package name for `apps/desktop/src-tauri` is `desktop`, per its `Cargo.toml` `[package].name`.)
 
 - [ ] **Step 3: Add `ToastPayload` to `toast.rs`**
 
@@ -541,12 +541,12 @@ In `on_screenshot_hotkey`, change every `fire_toast(app, "...")` call to `fire_p
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `cargo test -p magpie-desktop guess_`
+Run: `cargo test -p desktop guess_`
 Expected: PASS.
 
 - [ ] **Step 6: Run the full desktop crate's test suite and a release-mode type check to catch any remaining `fire_toast` call sites**
 
-Run: `cargo check -p magpie-desktop && cargo test -p magpie-desktop`
+Run: `cargo check -p desktop && cargo test -p desktop`
 Expected: both succeed with no leftover calls passing a bare `&str` to `fire_toast`.
 
 - [ ] **Step 7: Commit**
@@ -849,7 +849,7 @@ to:
 
 - [ ] **Step 4: Type-check**
 
-Run: `cargo check -p magpie-desktop` (substitute the real package name from `apps/desktop/src-tauri/Cargo.toml` if different)
+Run: `cargo check -p desktop`
 Expected: compiles cleanly. `on_capture_hotkey_released` and `PendingGuess`/`state.pending_guess` are new but every call site that needs them was updated in this task.
 
 Note: this task's new logic (`on_capture_hotkey_released`, `record_pending_guess`) is `AppHandle`-coupled glue, consistent with `on_capture_hotkey`/`on_screenshot_hotkey` themselves, neither of which has direct unit tests today (this codebase tests the underlying `Store` logic instead — see Task 2's tests for `guess_toast_payload`). Verify this task manually, per Step 5.
