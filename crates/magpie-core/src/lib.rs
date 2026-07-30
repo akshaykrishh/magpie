@@ -10,6 +10,7 @@ mod merge;
 mod model;
 mod projects;
 mod search;
+mod sources;
 mod tags;
 mod templates;
 

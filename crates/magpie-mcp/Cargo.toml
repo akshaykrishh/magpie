@@ -1,0 +1,24 @@
+[package]
+name = "magpie-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "MCP server exposing the capture queue to agents"
+
+[lib]
+name = "magpie_mcp"
+
+[[bin]]
+name = "magpie-mcp"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+magpie-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+rmcp = { version = "3", features = ["server", "macros", "transport-io"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process"] }
+uuid = { version = "1", features = ["v4"] }
