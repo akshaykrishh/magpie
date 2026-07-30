@@ -1,4 +1,4 @@
-# magpie
+<img src=".github/assets/readme-banner.png" alt="magpie" width="100%" />
 
 An open-source capture tool for AI-assisted work — a to-do list, clipboard, and scratchpad built
 for people who work across ChatGPT, Claude, Cursor, and agent CLIs. Runs on macOS and Linux.
