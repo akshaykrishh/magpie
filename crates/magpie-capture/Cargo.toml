@@ -17,9 +17,13 @@ objc2-foundation = "0.3"
 objc2-app-kit = "0.3"
 objc2-application-services = { version = "0.3", features = [
     "AXUIElement",
+    "AXError",
     "HIServices",
+    "libc",
 ] }
+objc2-core-foundation = "0.3"
 core-graphics = "0.25"
+libc = "0.2"
 
 [dev-dependencies]
 serial_test = "4"

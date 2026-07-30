@@ -45,7 +45,6 @@ crates/
 apps/desktop/
   src-tauri/         Tauri v2 shell — tray, windows, hotkeys, IPC
   src/               React + Tailwind + shadcn/ui
-extension/           browser extension (M3)
 ```
 
 ### Storage — SQLite, WAL, FTS5
@@ -195,10 +194,20 @@ developer capturing from a terminal better than a panel covering their output.
 **Provenance is tiered and degrades honestly:**
 
 - Free — app name, bundle id, timestamp. "Captured from Cursor" is most of the value.
-- With Accessibility — focused window title.
-- **Never prompt for Automation in v1.** Exact browser URLs need per-browser AppleScript consent
-  ("Magpie wants to control Google Chrome") — a third scary dialog. The browser extension (M3) is
-  the real answer and needs no OS permission at all.
+- With Accessibility — focused window title, via a bounded AXUIElement chain (app → focused
+  window → title; one attribute read, a 1s messaging timeout, no general tree traversal). This is
+  what disambiguates browser tabs, which are otherwise invisible to provenance entirely:
+  NSWorkspace reports "Chrome" whether the tab is chatgpt.com, claude.ai, or a GitHub issue, since
+  a browser is one application as far as the OS is concerned. ChatGPT, Claude, GitHub, and Stack
+  Overflow all set informative tab titles, so this answers "which page was this from" — the actual
+  ask — without needing the exact URL. Needs no permission beyond the Accessibility already
+  required for one-key capture, and no extra user action. Considered and rejected: a browser
+  extension (a second thing to install and maintain across two independently-versioned browser
+  stores) and a bookmarklet (still an extra click every time) — both solve the same problem for
+  strictly more cost than reading a title the OS already tracks.
+- **Never prompt for Automation.** Exact browser URLs need per-browser AppleScript consent
+  ("Magpie wants to control Google Chrome") — a third scary dialog, for a URL the window title
+  mostly makes unnecessary. Not planned.
 
 `capabilities()` reports what the running platform can actually deliver, and the UI adapts rather
 than showing fields it can't fill.
@@ -297,12 +306,16 @@ Focus behaviour and permission-denied states are the risky parts — build them 
 - Templates: create, edit, instantiate into one or several projects
 - Project auto-detection from spawn directory; branch constraint
 
-### M3 — browser extension → `v0.3`
+### M3 — retired, folded into capture provenance (done)
 
-Exact URL, page title, and selection with **zero OS permissions**, identically on every platform —
-including GNOME Wayland, where nothing else works. Manifest V3, Chrome + Firefox. Channel to the
-app via native messaging (correct, needs a host manifest per browser) or a 127.0.0.1 endpoint with
-a token (simpler).
+Originally planned as a browser extension for exact URL/title/selection with zero OS permissions.
+Reconsidered: an extension is a second thing to install and maintain across two
+independently-versioned browser stores; a bookmarklet (the lighter alternative also considered)
+is still an extra click every time. Neither was worth it for what turned out to be gettable for
+free — window-title reading via the Accessibility permission already required for one-key
+capture (see "Provenance is tiered" above) answers "which page was this from" without any new
+install, permission, or user action, at the cost of the exact URL, which the title mostly makes
+unnecessary. Shipped as part of `magpie-capture`'s macOS backend rather than as its own milestone.
 
 ### M4 — screenshots + OCR → `v0.4`
 

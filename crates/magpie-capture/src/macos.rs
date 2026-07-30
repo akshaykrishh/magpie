@@ -1,8 +1,11 @@
+use std::ptr::NonNull;
 use std::time::{Duration, Instant};
 
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString, NSWorkspace};
+use objc2_application_services::{AXError, AXUIElement};
+use objc2_core_foundation::{CFRetained, CFString, CFType};
 use objc2_foundation::NSString;
 
 use crate::backend::{Capabilities, CaptureBackend, CaptureMode, SourceInfo};
@@ -44,16 +47,21 @@ pub fn is_secure_input_enabled() -> bool {
 /// "Capture and permissions" for why this is opt-in and offered, never
 /// requested up front.
 ///
-/// Deliberately does not read the focused window title (the second
-/// provenance tier in docs/design.md). That needs AXUIElementCopyAttributeValue,
-/// which hands back an owned CFType through a raw out-parameter -- getting
-/// the retain/release semantics right needs more verification than was safe
-/// to do without a way to check the result against real Apple documentation
-/// beyond a docs.rs summary, and the one safe wrapper crate available
-/// (axuielement) pulls in a Swift toolchain as a build dependency just for
-/// that one feature. Left as a follow-up rather than risking a memory-safety
-/// bug or a disproportionate build dependency for a tier the design doc
-/// itself calls secondary to app-name/bundle-id.
+/// Also reads the focused window's title once Accessibility is granted --
+/// this is what disambiguates browser tabs, which are otherwise invisible
+/// to app-level provenance: NSWorkspace only reports "Chrome" whether the
+/// tab is chatgpt.com, claude.ai, or a GitHub issue, since a browser is one
+/// application as far as the OS is concerned. Reading the window title needs
+/// no permission beyond the Accessibility grant already required for
+/// one-key capture, and no extra user action -- unlike a browser extension
+/// or bookmarklet, both considered and rejected: an extension is a second
+/// thing to install and maintain across two independently-versioned browser
+/// stores, and a bookmarklet is still an extra click every time. A title
+/// alone won't give the exact URL (ChatGPT/Claude/GitHub/Stack Overflow all
+/// set informative tab titles, which covers "which page was this from" --
+/// the actual ask -- without it), and getting the URL itself would need
+/// either that same extension or a scary per-browser AppleScript automation
+/// prompt; not worth either cost for what the title already answers.
 pub struct MacosBackend {
     freshness: FreshnessTracker,
 }
@@ -124,12 +132,53 @@ impl CaptureBackend for MacosBackend {
 fn frontmost_app_info() -> Option<SourceInfo> {
     let workspace = NSWorkspace::sharedWorkspace();
     let app = workspace.frontmostApplication()?;
+    let pid = app.processIdentifier();
     Some(SourceInfo {
         app_name: app.localizedName().map(|s| s.to_string()),
         bundle_id: app.bundleIdentifier().map(|s| s.to_string()),
-        window_title: None,
+        window_title: MacosBackend::is_accessibility_trusted()
+            .then(|| focused_window_title(pid))
+            .flatten(),
         url: None,
     })
+}
+
+/// Focused-window → title, via Accessibility. Bounded and narrow on
+/// purpose: one attribute chain (app -> focused window -> title), a 1s
+/// messaging timeout so an unresponsive app can't hang capture, and a
+/// checked downcast (`CFRetained::downcast`, which verifies the CF type ID
+/// before casting) rather than an unchecked pointer cast -- this is not
+/// general AX tree traversal, and deliberately doesn't grow into it.
+/// Absence at any step (no focused window, no title, app doesn't support
+/// AX) degrades to `None`, never an error -- provenance is opportunistic.
+fn focused_window_title(pid: libc::pid_t) -> Option<String> {
+    let app_element = unsafe { AXUIElement::new_application(pid) };
+    unsafe { app_element.set_messaging_timeout(1.0) };
+
+    let window_element = copy_ax_attribute::<AXUIElement>(&app_element, "AXFocusedWindow")?;
+    let title = copy_ax_attribute::<CFString>(&window_element, "AXTitle")?;
+    Some(title.to_string())
+}
+
+/// `AXUIElementCopyAttributeValue`, wrapped: hands back an owned `CFType`
+/// through a raw out-parameter, which this takes ownership of correctly
+/// (`CFRetained::from_raw`, matching the Copy/Create-rule +1 the function
+/// name promises) and then safely downcasts to `T` -- `None` if the
+/// attribute is absent/unsupported or isn't actually a `T`, never a crash
+/// from an unexpected type.
+fn copy_ax_attribute<T: objc2_core_foundation::ConcreteType>(
+    element: &AXUIElement,
+    attribute: &str,
+) -> Option<CFRetained<T>> {
+    let attribute = CFString::from_str(attribute);
+    let mut value: *const CFType = std::ptr::null();
+    let err = unsafe { element.copy_attribute_value(&attribute, NonNull::from(&mut value)) };
+    if err != AXError::Success {
+        return None;
+    }
+    let value = NonNull::new(value as *mut CFType)?;
+    let retained: CFRetained<CFType> = unsafe { CFRetained::from_raw(value) };
+    retained.downcast::<T>().ok()
 }
 
 fn read_pasteboard_string() -> Result<Option<String>> {
@@ -245,6 +294,25 @@ mod tests {
         let info = frontmost_app_info();
         assert!(info.is_some());
         assert!(info.unwrap().app_name.is_some());
+    }
+
+    #[test]
+    #[serial]
+    fn window_title_is_populated_when_accessibility_is_trusted() {
+        // Can't assert exact title content -- it's whatever's frontmost on
+        // whatever machine runs this test. What's being verified is that
+        // the AXUIElement chain (app -> focused window -> title) actually
+        // returns *something* when Accessibility is granted, confirmed by
+        // hand against real running apps (WhatsApp, Terminal) before this
+        // test was written, not assumed from the code alone.
+        if !MacosBackend::is_accessibility_trusted() {
+            return;
+        }
+        let info = frontmost_app_info().expect("some app is always frontmost");
+        assert!(
+            info.window_title.is_some(),
+            "expected a window title with Accessibility trusted, got none"
+        );
     }
 
     #[test]
