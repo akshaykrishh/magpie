@@ -78,7 +78,9 @@ mod tests {
     #[test]
     fn ranks_more_relevant_matches_first() {
         let store = Store::open_in_memory().unwrap();
-        store.capture("session timeout session timeout", None).unwrap();
+        store
+            .capture("session timeout session timeout", None)
+            .unwrap();
         store.capture("a passing mention of session", None).unwrap();
 
         let results = store.search("session", 10).unwrap();

@@ -18,7 +18,10 @@ pub fn now_iso() -> String {
 
 const MIGRATIONS: &[(&str, &str)] = &[
     ("0001_init", include_str!("../migrations/0001_init.sql")),
-    ("0002_screenshots", include_str!("../migrations/0002_screenshots.sql")),
+    (
+        "0002_screenshots",
+        include_str!("../migrations/0002_screenshots.sql"),
+    ),
 ];
 
 /// `~/Library/Application Support/magpie/magpie.db` on macOS,
@@ -91,7 +94,10 @@ impl Store {
     /// `Connection::transaction_with_behavior`, which requires `&mut
     /// Connection` (unlike `unchecked_transaction`, which only needs `&self`
     /// but can't select a `TransactionBehavior`, always starting deferred).
-    pub(crate) fn with_conn_mut<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
+    pub(crate) fn with_conn_mut<T>(
+        &self,
+        f: impl FnOnce(&mut Connection) -> Result<T>,
+    ) -> Result<T> {
         let mut conn = self.conn.lock().expect("db mutex poisoned");
         f(&mut conn)
     }

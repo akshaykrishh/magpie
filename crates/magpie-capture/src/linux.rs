@@ -84,7 +84,11 @@ impl CaptureBackend for LinuxBackend {
         std::fs::create_dir_all(dest_dir)?;
 
         let sent = async_io::block_on(async {
-            Screenshot::request().interactive(true).modal(true).send().await
+            Screenshot::request()
+                .interactive(true)
+                .modal(true)
+                .send()
+                .await
         });
 
         let screenshot = match sent.and_then(|request| request.response()) {
@@ -143,7 +147,9 @@ impl CaptureBackend for LinuxBackend {
             .arg("stdout")
             .output()?;
         if !output.status.success() {
-            return Err(Error::Ocr(String::from_utf8_lossy(&output.stderr).into_owned()));
+            return Err(Error::Ocr(
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+            ));
         }
         let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
         Ok(if text.is_empty() { None } else { Some(text) })
@@ -172,7 +178,9 @@ mod tests {
     fn file_uri_to_path_decodes_percent_escapes() {
         assert_eq!(
             file_uri_to_path("file:///home/user/Pictures/Screenshot%20from%202026.png"),
-            Some(PathBuf::from("/home/user/Pictures/Screenshot from 2026.png"))
+            Some(PathBuf::from(
+                "/home/user/Pictures/Screenshot from 2026.png"
+            ))
         );
     }
 

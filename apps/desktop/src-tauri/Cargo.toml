@@ -1,9 +1,10 @@
 [package]
 name = "desktop"
-version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
-edition = "2021"
+version.workspace = true
+description = "The magpie desktop app -- tray, capture toast, pinned dock, and main window"
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

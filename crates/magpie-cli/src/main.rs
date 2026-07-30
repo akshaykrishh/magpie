@@ -60,8 +60,8 @@ async fn main() -> Result<()> {
 
     let db_path = magpie_core::default_db_path()
         .context("could not determine a data directory for this platform")?;
-    let store = Store::open(&db_path)
-        .with_context(|| format!("failed to open database at {db_path:?}"))?;
+    let store =
+        Store::open(&db_path).with_context(|| format!("failed to open database at {db_path:?}"))?;
 
     match cli.command {
         Command::Add { text } => {

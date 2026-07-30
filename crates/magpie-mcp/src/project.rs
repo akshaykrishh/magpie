@@ -76,7 +76,9 @@ fn project_name_from_remote(remote_url: &str) -> Option<String> {
 
 /// ".../magpie/.git" -> "magpie"
 fn project_name_from_common_git_dir(common_git_dir: &str) -> Option<String> {
-    let without_dotgit = common_git_dir.trim_end_matches("/.git").trim_end_matches(".git");
+    let without_dotgit = common_git_dir
+        .trim_end_matches("/.git")
+        .trim_end_matches(".git");
     without_dotgit
         .rsplit('/')
         .next()

@@ -17,7 +17,10 @@ fn main() {
         );
         println!("frontmost app: {:?}", backend.front_app());
         println!("secure input blocked: {}", backend.secure_input_blocked());
-        println!("(current clipboard text: {:?})", backend.read_capture_text());
+        println!(
+            "(current clipboard text: {:?})",
+            backend.read_capture_text()
+        );
 
         // Non-interactive whole-screen grab (no -i) so this exercises the
         // Vision OCR pipeline without needing a live selection -- run
@@ -44,7 +47,10 @@ fn main() {
         let args: Vec<String> = std::env::args().collect();
         if let Some(idx) = args.iter().position(|a| a == "ocr-file") {
             if let Some(path) = args.get(idx + 1) {
-                println!("ocr result for {path}: {:?}", backend.ocr_image(std::path::Path::new(path)));
+                println!(
+                    "ocr result for {path}: {:?}",
+                    backend.ocr_image(std::path::Path::new(path))
+                );
             }
         }
     }
@@ -55,6 +61,9 @@ fn main() {
 
         let backend = ClipboardBackend::new().expect("clipboard init");
         println!("capabilities: {:?}", backend.capabilities());
-        println!("(current clipboard text: {:?})", backend.read_capture_text());
+        println!(
+            "(current clipboard text: {:?})",
+            backend.read_capture_text()
+        );
     }
 }

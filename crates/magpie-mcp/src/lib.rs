@@ -9,8 +9,9 @@ use rmcp::{
         CallToolResult, ContentBlock, Implementation, ProtocolVersion, ServerCapabilities,
         ServerInfo,
     },
-    schemars, service::RequestContext, tool, tool_handler, tool_router, ErrorData as McpError,
-    RoleServer, ServerHandler, ServiceExt,
+    schemars,
+    service::RequestContext,
+    tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler, ServiceExt,
 };
 use serde::{Deserialize, Serialize};
 
@@ -234,7 +235,10 @@ impl MagpieServer {
         &self,
         Parameters(args): Parameters<SearchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let items = self.store.search(&args.query, args.limit).map_err(to_error)?;
+        let items = self
+            .store
+            .search(&args.query, args.limit)
+            .map_err(to_error)?;
         let out: Vec<_> = items
             .into_iter()
             .map(|c| McpCapture::from_capture(&self.store, c, "unvetted (raw stream)"))

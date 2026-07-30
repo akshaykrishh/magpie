@@ -81,7 +81,12 @@ impl Store {
     /// Like `queue_take`, but read-only -- for an agent that wants to see
     /// what's queued before deciding what to work on next, without
     /// claiming anything.
-    pub fn queue_peek(&self, project_id: Option<i64>, branch: Option<&str>, n: i64) -> Result<Vec<Capture>> {
+    pub fn queue_peek(
+        &self,
+        project_id: Option<i64>,
+        branch: Option<&str>,
+        n: i64,
+    ) -> Result<Vec<Capture>> {
         self.with_conn(|conn| {
             let sql = format!(
                 "SELECT {CAPTURE_COLUMNS} FROM captures
@@ -162,12 +167,10 @@ impl Store {
     /// each pid's liveness (platform-specific) and releases the dead ones.
     pub fn list_active_leases(&self) -> Result<Vec<(i64, i64)>> {
         self.with_conn(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, lease_pid FROM captures WHERE lease_session IS NOT NULL",
-            )?;
-            let rows = stmt.query_map([], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
-            })?;
+            let mut stmt =
+                conn.prepare("SELECT id, lease_pid FROM captures WHERE lease_session IS NOT NULL")?;
+            let rows =
+                stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
     }
@@ -183,7 +186,12 @@ impl Store {
                  WHERE id = ?1",
                 params![id],
             )?;
-            record_audit_tx(conn, "dead-pid-sweep", "lease_released_dead_process", Some(id))?;
+            record_audit_tx(
+                conn,
+                "dead-pid-sweep",
+                "lease_released_dead_process",
+                Some(id),
+            )?;
             Ok(())
         })
     }
@@ -243,7 +251,10 @@ mod tests {
         store.promote(a.id).unwrap();
         store.promote(b.id).unwrap();
 
-        let taken = store.queue_take(None, None, &identity("s1")).unwrap().unwrap();
+        let taken = store
+            .queue_take(None, None, &identity("s1"))
+            .unwrap()
+            .unwrap();
         assert_eq!(taken.id, a.id);
         assert_eq!(taken.lease_session.as_deref(), Some("s1"));
     }
@@ -258,7 +269,10 @@ mod tests {
         let second = store.queue_take(None, None, &identity("s2")).unwrap();
 
         assert!(first.is_some());
-        assert!(second.is_none(), "a leased item must not be handed out again");
+        assert!(
+            second.is_none(),
+            "a leased item must not be handed out again"
+        );
     }
 
     #[test]
@@ -283,12 +297,20 @@ mod tests {
         store.promote(a.id).unwrap();
         store.queue_take(None, None, &identity("s1")).unwrap();
 
-        let failed = store.capture_fail(a.id, "s1", "couldn't find the file").unwrap();
-        assert_eq!(failed.failed_reason.as_deref(), Some("couldn't find the file"));
+        let failed = store
+            .capture_fail(a.id, "s1", "couldn't find the file")
+            .unwrap();
+        assert_eq!(
+            failed.failed_reason.as_deref(),
+            Some("couldn't find the file")
+        );
         assert!(failed.lease_session.is_none());
 
         // Immediately eligible again -- no auto-expiry needed, no zombie.
-        let retaken = store.queue_take(None, None, &identity("s2")).unwrap().unwrap();
+        let retaken = store
+            .queue_take(None, None, &identity("s2"))
+            .unwrap()
+            .unwrap();
         assert_eq!(retaken.id, a.id);
         // Retaking clears the stale failure note so it doesn't look failed
         // and in-progress at once.
@@ -339,7 +361,9 @@ mod tests {
         // An agent scoped to project A must never be handed project B's
         // item -- this is the correctness property the whole MCP design
         // depends on.
-        let none_left_for_a = store.queue_take(Some(proj_a.id), None, &identity("agent2")).unwrap();
+        let none_left_for_a = store
+            .queue_take(Some(proj_a.id), None, &identity("agent2"))
+            .unwrap();
         assert!(none_left_for_a.is_none());
     }
 
@@ -348,18 +372,24 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let a = store.capture("main only", None).unwrap();
         store.promote(a.id).unwrap();
-        store.with_conn(|conn| {
-            conn.execute(
-                "UPDATE captures SET branch = 'main' WHERE id = ?1",
-                params![a.id],
-            )?;
-            Ok(())
-        }).unwrap();
+        store
+            .with_conn(|conn| {
+                conn.execute(
+                    "UPDATE captures SET branch = 'main' WHERE id = ?1",
+                    params![a.id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
 
-        let on_feature_branch = store.queue_take(None, Some("feature-x"), &identity("s1")).unwrap();
+        let on_feature_branch = store
+            .queue_take(None, Some("feature-x"), &identity("s1"))
+            .unwrap();
         assert!(on_feature_branch.is_none());
 
-        let on_main = store.queue_take(None, Some("main"), &identity("s1")).unwrap();
+        let on_main = store
+            .queue_take(None, Some("main"), &identity("s1"))
+            .unwrap();
         assert!(on_main.is_some());
     }
 

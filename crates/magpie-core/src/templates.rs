@@ -51,8 +51,7 @@ impl Store {
 
     pub fn list_templates(&self) -> Result<Vec<Template>> {
         self.with_conn(|conn| {
-            let sql =
-                format!("SELECT {TEMPLATE_COLUMNS} FROM templates ORDER BY created_at DESC");
+            let sql = format!("SELECT {TEMPLATE_COLUMNS} FROM templates ORDER BY created_at DESC");
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map([], template_from_row)?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -64,7 +63,11 @@ impl Store {
     /// in the library -- "Run on nexa-erp" must not consume the template,
     /// since the whole point is running the same prompt again elsewhere
     /// later (see docs/design.md "one stream, one working set").
-    pub fn instantiate_template(&self, template_id: i64, project_id: Option<i64>) -> Result<Capture> {
+    pub fn instantiate_template(
+        &self,
+        template_id: i64,
+        project_id: Option<i64>,
+    ) -> Result<Capture> {
         let template = self.get_template(template_id)?;
         let capture = self.capture(&template.body, None)?;
         self.assign_project(capture.id, project_id)?;
@@ -101,10 +104,14 @@ mod tests {
     #[test]
     fn create_update_delete_round_trip() {
         let store = Store::open_in_memory().unwrap();
-        let t = store.create_template("Review", "Review this diff for bugs").unwrap();
+        let t = store
+            .create_template("Review", "Review this diff for bugs")
+            .unwrap();
         assert_eq!(t.title, "Review");
 
-        let updated = store.update_template(t.id, "Review v2", "Review strictly").unwrap();
+        let updated = store
+            .update_template(t.id, "Review v2", "Review strictly")
+            .unwrap();
         assert_eq!(updated.body, "Review strictly");
 
         store.delete_template(t.id).unwrap();
@@ -120,7 +127,9 @@ mod tests {
         let project = store
             .get_or_create_project("magpie", Some("git@github.com:x/magpie.git"), None)
             .unwrap();
-        let t = store.create_template("Security review", "Look for exploitable issues").unwrap();
+        let t = store
+            .create_template("Security review", "Look for exploitable issues")
+            .unwrap();
 
         let capture = store.instantiate_template(t.id, Some(project.id)).unwrap();
         assert_eq!(capture.body, "Look for exploitable issues");
@@ -143,7 +152,9 @@ mod tests {
         let b = store
             .get_or_create_project("b", Some("git@github.com:x/b.git"), None)
             .unwrap();
-        let t = store.create_template("Update changelog", "Update CHANGELOG.md").unwrap();
+        let t = store
+            .create_template("Update changelog", "Update CHANGELOG.md")
+            .unwrap();
 
         let captures = store
             .instantiate_template_into_many(t.id, &[Some(a.id), Some(b.id)])

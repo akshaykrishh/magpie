@@ -294,7 +294,9 @@ fn capture_screenshot_region(dest_dir: &Path) -> Result<Option<ScreenshotCapture
     // (Escape) -- that, not the exit status, is the reliable cancellation
     // signal. screencapture's exit code on cancel isn't documented as part
     // of any stable contract, so this doesn't depend on it either way.
-    let file_is_empty_or_missing = std::fs::metadata(&path).map(|m| m.len() == 0).unwrap_or(true);
+    let file_is_empty_or_missing = std::fs::metadata(&path)
+        .map(|m| m.len() == 0)
+        .unwrap_or(true);
     if file_is_empty_or_missing || !status.success() {
         let _ = std::fs::remove_file(&path);
         return Ok(None);
@@ -320,8 +322,11 @@ fn ocr_image(path: &Path) -> Result<Option<String>> {
     let options: objc2::rc::Retained<NSDictionary<NSString, objc2::runtime::AnyObject>> =
         NSDictionary::from_slices::<NSString>(&[], &[]);
 
-    let handler =
-        VNImageRequestHandler::initWithData_options(VNImageRequestHandler::alloc(), &data, &options);
+    let handler = VNImageRequestHandler::initWithData_options(
+        VNImageRequestHandler::alloc(),
+        &data,
+        &options,
+    );
 
     let request = VNRecognizeTextRequest::new();
     request.setRecognitionLevel(VNRequestTextRecognitionLevel::Accurate);
@@ -394,7 +399,9 @@ fn assemble_text(mut fragments: Vec<TextFragment>) -> Option<String> {
     let mut lines: Vec<(f64, Vec<TextFragment>)> = Vec::new();
     for fragment in fragments {
         match lines.last_mut() {
-            Some((anchor_y, words)) if (*anchor_y - fragment.y_center).abs() < fragment.height / 2.0 => {
+            Some((anchor_y, words))
+                if (*anchor_y - fragment.y_center).abs() < fragment.height / 2.0 =>
+            {
                 words.push(fragment);
             }
             _ => {
@@ -408,7 +415,11 @@ fn assemble_text(mut fragments: Vec<TextFragment>) -> Option<String> {
         .into_iter()
         .map(|(_, mut words)| {
             words.sort_by(|a, b| a.x_center.partial_cmp(&b.x_center).unwrap());
-            words.into_iter().map(|w| w.text).collect::<Vec<_>>().join(" ")
+            words
+                .into_iter()
+                .map(|w| w.text)
+                .collect::<Vec<_>>()
+                .join(" ")
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -425,8 +436,8 @@ fn post_cmd_c() -> Result<()> {
     key_down.set_flags(CGEventFlags::CGEventFlagCommand);
     key_down.post(CGEventTapLocation::HID);
 
-    let key_up = CGEvent::new_keyboard_event(source, KEYCODE_C, false)
-        .map_err(|_| Error::EventCreation)?;
+    let key_up =
+        CGEvent::new_keyboard_event(source, KEYCODE_C, false).map_err(|_| Error::EventCreation)?;
     key_up.set_flags(CGEventFlags::CGEventFlagCommand);
     key_up.post(CGEventTapLocation::HID);
 
@@ -440,7 +451,12 @@ mod tests {
     use super::*;
 
     fn fragment(y_center: f64, height: f64, x_center: f64, text: &str) -> TextFragment {
-        TextFragment { y_center, height, x_center, text: text.to_string() }
+        TextFragment {
+            y_center,
+            height,
+            x_center,
+            text: text.to_string(),
+        }
     }
 
     #[test]

@@ -146,7 +146,9 @@ mod tests {
 
         assert!(store.search("invoice", 10).unwrap().is_empty());
 
-        store.set_blob_ocr_text(blob.id, "invoice total 42 dollars").unwrap();
+        store
+            .set_blob_ocr_text(blob.id, "invoice total 42 dollars")
+            .unwrap();
 
         let results = store.search("invoice", 10).unwrap();
         assert_eq!(results.len(), 1);
@@ -169,10 +171,12 @@ mod tests {
         let blob = store.get_blob_for_capture(capture.id).unwrap().unwrap();
         store.set_blob_ocr_text(blob.id, "receipt total").unwrap();
 
-        store.with_conn(|conn| {
-            conn.execute("DELETE FROM captures WHERE id = ?1", params![capture.id])?;
-            Ok(())
-        }).unwrap();
+        store
+            .with_conn(|conn| {
+                conn.execute("DELETE FROM captures WHERE id = ?1", params![capture.id])?;
+                Ok(())
+            })
+            .unwrap();
 
         assert!(store.get_blob_for_capture(capture.id).unwrap().is_none());
         assert!(store.search("receipt", 10).unwrap().is_empty());

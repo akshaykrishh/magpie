@@ -105,7 +105,10 @@ pub fn merge_captures(state: State<AppState>, ids: Vec<i64>) -> CmdResult<Captur
 }
 
 #[tauri::command]
-pub fn list_merge_sources(state: State<AppState>, merged_capture_id: i64) -> CmdResult<Vec<Capture>> {
+pub fn list_merge_sources(
+    state: State<AppState>,
+    merged_capture_id: i64,
+) -> CmdResult<Vec<Capture>> {
     map_err(state.store.list_merge_sources(merged_capture_id))
 }
 
@@ -250,7 +253,11 @@ pub fn get_blob_image_data_url(
         return Ok(None);
     };
     let bytes = std::fs::read(&blob.path).map_err(|e| e.to_string())?;
-    Ok(Some(format!("data:{};base64,{}", blob.mime, BASE64.encode(bytes))))
+    Ok(Some(format!(
+        "data:{};base64,{}",
+        blob.mime,
+        BASE64.encode(bytes)
+    )))
 }
 
 /// Opens System Settings directly to the Accessibility pane, rather than

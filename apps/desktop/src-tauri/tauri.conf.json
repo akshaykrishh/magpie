@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "desktop",
+  "productName": "magpie",
   "version": "0.1.0",
   "identifier": "app.magpie.desktop",
   "build": {
@@ -55,13 +55,19 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["dmg", "deb", "appimage"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "A capture tool for AI-assisted work",
+    "longDescription": "An open-source capture tool for people working across ChatGPT, Claude, Cursor, and agent CLIs. Runs on macOS and Linux. Agents can read and write your queue over MCP.",
+    "copyright": "Copyright the magpie contributors",
+    "homepage": "https://github.com/akshaykrishh/magpie"
   }
 }

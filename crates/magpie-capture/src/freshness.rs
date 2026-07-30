@@ -32,7 +32,10 @@ impl FreshnessTracker {
     pub fn check(&self, text: Option<String>) -> Option<String> {
         let text = text.filter(|t| !t.trim().is_empty())?;
         let hash = hash_text(&text);
-        let mut last_seen = self.last_seen_hash.lock().expect("freshness mutex poisoned");
+        let mut last_seen = self
+            .last_seen_hash
+            .lock()
+            .expect("freshness mutex poisoned");
         if *last_seen == Some(hash) {
             return None;
         }
@@ -73,10 +76,7 @@ mod tests {
     #[test]
     fn repeating_the_same_capture_is_not_fresh_again() {
         let tracker = FreshnessTracker::seeded_with(None);
-        assert_eq!(
-            tracker.check(Some("x".to_string())),
-            Some("x".to_string())
-        );
+        assert_eq!(tracker.check(Some("x".to_string())), Some("x".to_string()));
         assert_eq!(tracker.check(Some("x".to_string())), None);
     }
 
