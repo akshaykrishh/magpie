@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "apps/desktop/src-tauri",
+    "crates/magpie-core",
+    "crates/magpie-capture",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/akshaykrishh/magpie"
+
+[workspace.dependencies]
+magpie-core = { path = "crates/magpie-core" }
+magpie-capture = { path = "crates/magpie-capture" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"

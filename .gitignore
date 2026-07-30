@@ -1,7 +1,5 @@
-# Rust
-/target/
-Cargo.lock
-!/apps/desktop/src-tauri/Cargo.lock
+# Rust — workspace-level Cargo.lock is committed (the workspace produces a binary)
+target/
 
 # Node
 node_modules/
