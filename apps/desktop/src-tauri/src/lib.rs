@@ -77,10 +77,18 @@ fn fire_toast(app: &AppHandle) {
 
     show_toast(app);
 
+    // AppKit window/panel calls (hide_toast -> Panel::hide -> orderOut:) must
+    // happen on the main thread. Sleeping on a background thread and hopping
+    // back via run_on_main_thread keeps the delay off the event loop without
+    // touching AppKit off-thread — doing that crashes with EXC_BREAKPOINT in
+    // -[NSWindow _doOrderWindow:], which is what happened before this fix.
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(TOAST_VISIBLE_MS));
-        hide_toast(&app);
+        let for_main_thread = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            hide_toast(&for_main_thread);
+        });
     });
 }
 
