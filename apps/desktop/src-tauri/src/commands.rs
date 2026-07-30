@@ -49,6 +49,16 @@ pub fn list_now(state: State<AppState>, project_id: Option<i64>) -> CmdResult<Ve
     map_err(state.store.list_now(project_id))
 }
 
+/// A prompt typed directly into the app, as opposed to something captured
+/// from elsewhere -- goes straight into Now rather than landing in the
+/// stream first, since typing it here is already a deliberate act of
+/// queuing work, not an ambiguous "keep this for later".
+#[tauri::command]
+pub fn add_typed_capture(state: State<AppState>, body: String) -> CmdResult<Capture> {
+    let capture = map_err(state.store.capture(&body, None))?;
+    map_err(state.store.promote(capture.id))
+}
+
 #[tauri::command]
 pub fn promote_capture(state: State<AppState>, id: i64) -> CmdResult<Capture> {
     map_err(state.store.promote(id))

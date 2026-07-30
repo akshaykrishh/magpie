@@ -15,10 +15,18 @@ use crate::Store;
 /// by doubling it), ANDed together. This can't error on any input short of
 /// an empty query, at the cost of not exposing FTS5's operator syntax to
 /// users -- an acceptable trade for a capture tool's search box.
+///
+/// Each phrase gets a trailing `*` *outside* the closing quote, which FTS5
+/// documents as a prefix-match marker on the quoted phrase -- the quoting
+/// still fully protects against operator injection, since the tokenizer
+/// only ever sees the literal contents between the quotes; the `*` is
+/// parsed separately, after the string closes. Without this, a live search
+/// box feels broken while typing: "term" doesn't match "terminal" until the
+/// whole word is typed, since an unmarked phrase is an exact-token match.
 fn sanitize_query(query: &str) -> Option<String> {
     let tokens: Vec<String> = query
         .split_whitespace()
-        .map(|tok| format!("\"{}\"", tok.replace('"', "\"\"")))
+        .map(|tok| format!("\"{}\"*", tok.replace('"', "\"\"")))
         .collect();
     if tokens.is_empty() {
         None
@@ -87,6 +95,20 @@ mod tests {
         let results = store.search("auth bug", 10).unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].body.contains("auth"));
+    }
+
+    #[test]
+    fn partial_word_matches_as_a_prefix() {
+        // A live search box searches on every keystroke -- "term" must
+        // match "terminal" immediately, not only once the whole word is
+        // typed. Found by hand: typing into the real search UI showed no
+        // results until the complete word was entered.
+        let store = Store::open_in_memory().unwrap();
+        store.capture("fix the terminal capture bug", None).unwrap();
+
+        let results = store.search("term", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].body.contains("terminal"));
     }
 
     #[test]

@@ -33,6 +33,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_stream,
             commands::list_now,
+            commands::add_typed_capture,
             commands::promote_capture,
             commands::demote_capture,
             commands::reorder_capture,
