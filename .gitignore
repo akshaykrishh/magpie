@@ -1,0 +1,19 @@
+# Rust
+/target/
+Cargo.lock
+!/apps/desktop/src-tauri/Cargo.lock
+
+# Node
+node_modules/
+dist/
+
+# Tauri
+apps/desktop/src-tauri/gen/
+
+# OS
+.DS_Store
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea/

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>magpie toast</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        overflow: hidden;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      #toast {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        width: 280px;
+        height: 64px;
+        box-sizing: border-box;
+        border-radius: 12px;
+        background: rgba(28, 28, 30, 0.92);
+        color: #fff;
+        font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      }
+      #toast .check {
+        color: #34c759;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="toast">
+      <span class="check">✓</span>
+      <span id="msg">Captured</span>
+    </div>
+    <script type="module" src="/src/toast.ts"></script>
+  </body>
+</html>

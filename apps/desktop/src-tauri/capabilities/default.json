@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window and the M0 spike toast window",
+  "windows": ["main", "toast"],
+  "permissions": [
+    "core:default",
+    "opener:default"
+  ]
+}
