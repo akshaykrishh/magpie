@@ -1,0 +1,73 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+/* magpie brand -- same palette and type as the desktop app
+   (apps/desktop/src/index.css): Ink / Slate Teal / Slate Teal Light /
+   Paper, Space Grotesk for headings, JetBrains Mono for code. neutral.css
+   above still supplies the semantic accent colors (info/warning/error/...)
+   unchanged -- only the base palette variables are overridden below. */
+@theme {
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-heading), var(--font-sans);
+  --font-mono: var(--font-mono), ui-monospace, monospace;
+}
+
+@theme {
+  --color-fd-background: #f4f2ee;
+  --color-fd-foreground: #0e0e0e;
+  --color-fd-muted: #e9e6df;
+  --color-fd-muted-foreground: #6b6b68;
+  --color-fd-popover: #f9f8f5;
+  --color-fd-popover-foreground: #0e0e0e;
+  --color-fd-card: #ffffff;
+  --color-fd-card-foreground: #0e0e0e;
+  --color-fd-border: hsla(40, 8%, 40%, 18%);
+  --color-fd-primary: #123a4b;
+  --color-fd-primary-foreground: #f4f2ee;
+  --color-fd-secondary: #e9e6df;
+  --color-fd-secondary-foreground: #123a4b;
+  --color-fd-accent: hsla(197, 60%, 20%, 10%);
+  --color-fd-accent-foreground: #123a4b;
+  --color-fd-ring: #3e7a92;
+  --color-fd-overlay: hsla(0, 0%, 0%, 0.3);
+}
+
+.dark {
+  --color-fd-background: #0b0c0d;
+  --color-fd-foreground: #f4f2ee;
+  --color-fd-muted: #1a1b1c;
+  --color-fd-muted-foreground: hsla(40, 8%, 85%, 65%);
+  --color-fd-popover: #141516;
+  --color-fd-popover-foreground: #f4f2ee;
+  --color-fd-card: #141516;
+  --color-fd-card-foreground: #f4f2ee;
+  --color-fd-border: hsla(40, 8%, 70%, 12%);
+  --color-fd-primary: #3e7a92;
+  --color-fd-primary-foreground: #0b0c0d;
+  --color-fd-secondary: #1a1b1c;
+  --color-fd-secondary-foreground: #3e7a92;
+  --color-fd-accent: hsla(197, 55%, 55%, 14%);
+  --color-fd-accent-foreground: #3e7a92;
+  --color-fd-ring: #3e7a92;
+  --color-fd-overlay: hsla(0, 0%, 0%, 0.5);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
+  letter-spacing: -0.02em;
+}
+
+html {
+  scrollbar-gutter: stable;
+}
+
+html > body[data-scroll-locked] {
+  margin-right: 0px !important;
+  --removed-body-scroll-bar-size: 0px !important;
+}

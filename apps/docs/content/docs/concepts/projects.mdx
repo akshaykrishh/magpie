@@ -1,0 +1,34 @@
+---
+title: Projects
+description: Zero-configuration scoping, derived from your git remote.
+---
+
+## Identity is the git remote, not the path
+
+A project's identity is its **git remote URL**, falling back to the common git directory when
+there's no remote. This is deliberate:
+
+- It **unifies worktrees** -- the same repository checked out in multiple worktrees shares one
+  backlog instead of fragmenting it per checkout.
+- It **survives re-cloning** to a different path.
+- It **survives renames**.
+
+## The MCP server needs zero configuration
+
+`magpie serve-mcp` derives its project from its own spawn directory by shelling out to `git
+remote get-url origin` (and `git rev-parse --git-common-dir` as the fallback). An agent host
+(Claude Code, Cursor) launches the server from wherever it's already working, so the right
+project is scoped automatically -- nothing to configure per-repository.
+
+## Optional branch constraint
+
+A capture can carry an optional `branch` value. When set, only an MCP session on that exact
+branch can lease it with `queue_take` -- useful for work that's only valid against a specific
+branch or worktree. `NULL` (the default) means any session in the project can take it.
+
+## Projects are not tags
+
+Project scoping uses a dedicated `project_id` column, not a tag. A typo in a tag name would
+silently mis-scope agent work with no error; a project derived from `git remote get-url` can't be
+typo'd. Tags remain for cross-cutting themes (`#bug`, `#refactor`) that intentionally span
+projects.

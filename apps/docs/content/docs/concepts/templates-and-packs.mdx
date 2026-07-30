@@ -1,0 +1,69 @@
+---
+title: Templates and packs
+description: Reusable prompts, and shared git-hosted collections of them.
+---
+
+## Templates persist; captures drain
+
+A capture is meant to be acted on and marked done. A **template** is different -- it's a
+reusable prompt you'll want to run again, in this project or several. Instantiating a template
+copies its body into a new capture (promoted straight into Now) and leaves the template itself
+untouched in the library, so "run this on nexa-erp" doesn't consume the template you'll also want
+to run on your next project.
+
+## Placeholders
+
+A template body can declare `{{name}}` placeholders. Instantiating with values fills them in;
+leaving a placeholder unfilled keeps it **literal** in the resulting capture rather than silently
+blanking it out -- an honest signal that something wasn't filled in, not a smaller version of
+what the prompt actually said. The app shows a small form for any template with placeholders
+before running it.
+
+## Packs: shared, git-hosted collections
+
+A **pack** is a git repository with a `magpie.json` manifest at its root, describing a named
+collection of prompts. No server, no accounts, no hosting, no moderation to run -- a pack is just
+a repo someone can `git clone`.
+
+```json title="magpie.json"
+{
+  "name": "Dev Workflow Pack",
+  "description": "A small set of prompts for everyday development",
+  "prompts": [
+    {
+      "title": "Fix a failing test",
+      "description": "Diagnose and fix a specific failing test",
+      "body": "Investigate why {{test_name}} is failing in {{package}} and fix it.",
+      "variables": {
+        "test_name": { "description": "The name of the failing test" },
+        "package": { "description": "Which package or crate it's in" }
+      }
+    },
+    {
+      "title": "Update changelog",
+      "body": "Update CHANGELOG.md with today's changes."
+    }
+  ]
+}
+```
+
+Import (or re-import) a pack with the CLI:
+
+```bash
+magpie pack add github:someone/agent-prompts
+magpie pack add https://example.com/some-pack.git
+magpie pack add ./a-local-pack     # for testing a pack before publishing it
+```
+
+Named `pack add` rather than plain `add`, since that name is already taken by plain-text capture
+-- `magpie add github:...` and `magpie add "some text I copied"` would otherwise be
+indistinguishable.
+
+Re-running `pack add` against the same source **updates that pack's templates in place** rather
+than duplicating them, matched by title within the pack. Pulling a pack's latest changes is just
+importing it again.
+
+```bash
+magpie pack list                # every imported pack
+magpie pack templates <pack_id> # one pack's templates
+```

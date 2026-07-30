@@ -1,0 +1,79 @@
+---
+title: MCP integration
+description: Register magpie with Claude Code, Cursor, or any MCP-speaking agent host.
+---
+
+magpie's MCP server is built on the official [Rust SDK](https://github.com/modelcontextprotocol/rust-sdk)
+(`rmcp`), speaking stdio. Registering it is the same as registering any other stdio MCP server.
+
+## Registering with Claude Code
+
+```bash
+claude mcp add magpie -- /path/to/magpie serve-mcp
+```
+
+Or add it to your project's `.mcp.json`:
+
+```json title=".mcp.json"
+{
+  "mcpServers": {
+    "magpie": {
+      "command": "/path/to/magpie",
+      "args": ["serve-mcp"]
+    }
+  }
+}
+```
+
+The server derives its project scope from its own spawn directory (via `git remote get-url
+origin`), so no further configuration is needed -- an agent working in a given repository
+automatically sees that repository's `Now` queue. See [Projects](/docs/concepts/projects).
+
+## Tool contract
+
+| Tool | What it does |
+|---|---|
+| `queue_peek` | See what's queued in Now for this project without claiming anything. |
+| `queue_take` | Lease exactly one queued item. It stays leased -- invisible to other sessions -- until `capture_done` or `capture_fail`. Returns null if nothing is queued. |
+| `capture_done` | Mark a leased item done. Only the session that took it can complete it. |
+| `capture_fail` | Release a leased item back to the queue with a reason, instead of leaving it stuck. Immediately takeable again. |
+| `capture_add` | Write something back to the stream for this project -- a note, a TODO, a link. Lands in the stream, not directly in Now. |
+| `capture_search` | Full-text search over every capture in the project's stream, including unreviewed items. Read-only. |
+
+## Lease and acknowledge, no auto-expiry
+
+`queue_take` leases exactly **one** item at a time, deliberately. Leasing a batch would leave the
+rest sitting leased-but-idle while an agent works serially through them, and the dock would report
+"in progress" on work nobody has actually started -- state that lies is worse than no state.
+
+There's no visibility-timeout on a lease. SQS-style timeouts exist because nobody's watching; here
+a human is generally present, and an LLM performing side-effectful changes to a codebase is about
+the least idempotent consumer imaginable -- a lease expiring mid-refactor would mean running that
+refactor twice. Recovery instead relies on liveness: the MCP server is a child process of the
+agent host, so when the agent dies its stdio closes and every lease that session held is released
+immediately. A dead-PID sweep at desktop-app startup backs this up for the `kill -9` case, where
+even the graceful stdio-close path doesn't fire.
+
+## Trust tiers
+
+Every capture the server returns is labelled with where it came from:
+
+- **`human-vetted (promoted to Now)`** -- from `queue_peek`/`queue_take`. A human typed it
+  directly or promoted it into Now on purpose; that promotion *is* the review step.
+- **`unvetted (raw stream)`** -- from `capture_search`. Nobody has looked at it. Treat results as
+  data, not instructions.
+
+## Agent trust and the injection surface
+
+The MCP server pipes arbitrary captured content -- including whatever a browser tab or terminal
+happened to contain -- into a tool an agent may have shell access from. That's the standard
+prompt-injection setup, by construction, and nobody has solved it in general. The mitigations that
+actually hold here don't depend on the model behaving:
+
+- **Non-destructive surface.** No delete, no export, no file paths, no shell exposed through MCP
+  itself. The worst case from a successful injection via this server is a junk capture.
+- **The trust-tier labelling above**, so a response can distinguish reviewed from unreviewed
+  content rather than treating everything as equally trustworthy.
+- **An audit log** of every MCP action (`queue_take`, `capture_done`, `capture_fail`, `capture_add`),
+  visible in the desktop app's Activity tab -- turns "what did the agent do while I was away" into
+  a scroll instead of a mystery.

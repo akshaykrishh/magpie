@@ -1,0 +1,49 @@
+---
+title: Introduction
+description: A capture tool for AI-assisted work that runs on macOS and Linux, and lets agents read and write your queue directly.
+---
+
+magpie is a capture tool for people working across ChatGPT, Claude, Cursor, and agent CLIs. One
+hotkey saves whatever you're looking at into a running stream, without switching windows or
+losing focus on what you were doing.
+
+Two things set it apart from a typical clipboard manager:
+
+<Cards>
+  <Card title="Runs on Linux" description="Most tools in this space are macOS-only. magpie's capture backend is built against portable platform primitives (the clipboard, the freedesktop screenshot portal) rather than macOS-specific APIs where an alternative exists." />
+  <Card title="Agents can read and write the queue" description="A Model Context Protocol (MCP) server exposes the capture queue directly to Claude Code, Cursor, and anything else that speaks MCP -- captures aren't just for you to re-read later, they can become work items an agent drains." />
+</Cards>
+
+## The core loop
+
+1. **Capture** -- press a hotkey while looking at anything (a ChatGPT answer, a terminal error, a
+   GitHub issue). It lands in the stream with provenance (which app, and on macOS with
+   Accessibility granted, the window title) attached automatically.
+2. **Promote** -- decide a captured item is actually actionable, and pull it into `Now`, a short
+   working queue scoped to the current project.
+3. **Hand off** -- an agent connected over MCP leases an item from `Now`, works it, and reports
+   back done or failed. Every action is logged to an audit trail you can review.
+
+Nothing is auto-filed or auto-categorized. The stream is everything you've ever captured, in one
+reverse-chronological list; `Now` is only what you've deliberately decided is worth acting on.
+See [Stream and Now](/docs/concepts/stream-and-now) for why that split exists.
+
+## Where to go next
+
+<Cards>
+  <Card title="Installation" href="/docs/installation" description="Build magpie from source (no signed releases yet)." />
+  <Card title="Quick Start" href="/docs/quick-start" description="Capture your first item and promote it into Now." />
+  <Card title="MCP integration" href="/docs/mcp" description="Register magpie with Claude Code or Cursor and drive the queue from an agent." />
+  <Card title="CLI reference" href="/docs/cli" description="Every magpie subcommand, for scripting and for agent CLIs that don't speak MCP." />
+</Cards>
+
+## Status
+
+magpie is early and functional, not yet a polished 1.0. The capture core, MCP server, and CLI
+work end-to-end on macOS. On Linux, the full test suite runs in CI on every push, but nobody has
+yet run the actual desktop app on a real Linux machine by hand -- see
+[Architecture](/docs/architecture) for exactly what's verified versus what's implemented-but-untested.
+There are no signed releases yet; see [Installation](/docs/installation) for building from source.
+
+magpie is [GPL-3.0](https://github.com/akshaykrishh/magpie/blob/main/LICENSE) licensed and
+developed in the open at [github.com/akshaykrishh/magpie](https://github.com/akshaykrishh/magpie).

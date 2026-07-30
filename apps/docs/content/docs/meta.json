@@ -1,0 +1,14 @@
+{
+  "title": "magpie",
+  "pages": [
+    "index",
+    "installation",
+    "quick-start",
+    "concepts",
+    "cli",
+    "mcp",
+    "architecture",
+    "schema",
+    "contributing"
+  ]
+}

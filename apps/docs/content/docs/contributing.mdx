@@ -1,0 +1,55 @@
+---
+title: Contributing
+description: Dev setup, testing, and what to expect from a PR.
+---
+
+magpie is [GPL-3.0](https://github.com/akshaykrishh/magpie/blob/main/LICENSE) and developed in
+the open. Contributions are welcome; push access is held by the maintainer alone -- PRs are
+reviewed and merged, not self-merged.
+
+## Dev setup
+
+See [Installation](/docs/installation) for the full build-from-source steps. In short:
+
+```bash
+git clone https://github.com/akshaykrishh/magpie.git
+cd magpie/apps/desktop
+pnpm install
+pnpm tauri dev
+```
+
+## Before opening a PR
+
+CI runs `fmt`, `clippy -D warnings`, the full test suite, and a frontend typecheck on both macOS
+and Ubuntu on every push -- run the same checks locally first:
+
+```bash
+# from the repo root
+cargo fmt
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+
+# from apps/desktop
+pnpm exec tsc --noEmit
+pnpm run build
+```
+
+For anything touching the capture backends (`crates/magpie-capture`), test against the real
+running app, not just unit tests -- several real bugs in this codebase (a stale-clipboard race, a
+Vision OCR line-segmentation issue, a CI-only Accessibility edge case) were only found by actually
+running the thing, not by a clean compile.
+
+## A good first issue
+
+The `CaptureBackend` trait (`crates/magpie-capture/src/backend.rs`) is implemented for macOS and
+Linux; a Windows implementation is the natural next platform and doesn't need to touch anything
+else in the codebase -- a clean trait to implement against, with the existing test structure to
+follow. See [Architecture](/docs/architecture) for how the trait fits into the rest of the
+system.
+
+## Where design decisions are recorded
+
+Non-obvious choices (why SQLite, why no MCP lease timeout, why window-title reading instead of a
+browser extension) are documented as *reasoning*, not just *what*, throughout this site and in
+code comments near the decision itself -- if you're changing something that looks deliberate,
+it probably is; check the comment above it before assuming it's an oversight.

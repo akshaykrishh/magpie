@@ -1,0 +1,106 @@
+---
+title: Schema reference
+description: The actual SQLite schema, table by table.
+---
+
+The database is a real, inspectable SQLite file at a documented path (see
+[Architecture](/docs/architecture)) -- `sqlite3 ~/Library/Application\ Support/magpie/magpie.db`
+works. This page describes the tables migration-by-migration, in the order they were introduced.
+
+## `0001_init` -- the core
+
+### `projects`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER` | |
+| `name` | `TEXT` | |
+| `remote_url` | `TEXT` | Unique when not null. See [Projects](/docs/concepts/projects). |
+| `common_git_dir` | `TEXT` | Unique when not null; fallback identity when there's no remote. |
+| `created_at` | `TEXT` | RFC3339 UTC. |
+
+### `captures`
+
+The stream and Now are the same table -- `queue_pos` is what distinguishes them.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id`, `body`, `created_at` | | |
+| `done_at`, `failed_reason` | `TEXT` | |
+| `queue_pos` | `REAL` | `NULL` = stream only. Non-null = promoted into Now; the value is the fractional sort key. |
+| `project_id` | `INTEGER` | References `projects`. |
+| `branch` | `TEXT` | Optional constraint -- only an MCP session on this branch can lease the item. |
+| `lease_session`, `lease_client`, `lease_pid`, `lease_at` | | MCP lease state. No auto-expiry column by design -- see [MCP integration](/docs/mcp). |
+| `source_id` | `INTEGER` | References `sources`. |
+| `merged_into` | `INTEGER` | Self-reference; non-null means this capture was absorbed into another via merge. |
+
+### `sources`
+
+Provenance for a capture: `app_name`, `bundle_id`, `window_title`, `url`, `captured_at`.
+
+### `templates`
+
+`id`, `title`, `body`, `created_at` at this point -- `description`, `variables_json`, and
+`pack_id` arrive in `0003_packs`.
+
+### `tags` / `capture_tags`
+
+A plain many-to-many join, `tags(id, name UNIQUE)` and `capture_tags(capture_id, tag_id)`.
+
+### `blobs`
+
+Screenshot metadata -- the image bytes themselves live on disk, not in the database.
+
+| Column | Type | Notes |
+|---|---|---|
+| `capture_id` | `INTEGER` | `ON DELETE CASCADE`. |
+| `path`, `mime` | `TEXT` | |
+| `width`, `height` | `INTEGER` | |
+| `ocr_text` | `TEXT` | `NULL` until OCR finishes; the trigger that keeps this searchable is added in `0002`. |
+
+### `audit`
+
+Every MCP action: `at`, `actor`, `action`, `capture_id`. What the app's Activity tab renders.
+
+### `captures_fts`
+
+An external-content FTS5 virtual table over `captures.body`, kept in sync by `AFTER
+INSERT/DELETE/UPDATE` triggers.
+
+## `0002_screenshots` -- OCR joins search
+
+`captures_fts` gains a second column, `ocr_text`, sourced from `blobs.ocr_text` rather than
+`captures` itself (OCR finishes asynchronously, after the capture row already exists). Getting
+this right required two real fixes over the naive version:
+
+- **The delete trigger moved from `AFTER DELETE` to `BEFORE DELETE`.** `blobs.capture_id` cascades
+  on delete, so by the time an `AFTER DELETE` trigger ran, the blob row it needs to read
+  `ocr_text` from would already be gone. `BEFORE DELETE` runs strictly before the cascade.
+- **Every trigger carries both columns forward together.** FTS5's external-content `'delete'`
+  command needs the *exact* values currently indexed to remove the right postings -- a
+  column-list insert that only supplies one column implicitly zeroes the other, which would
+  silently drop half the index on the next write.
+
+A new `blobs_fts_ocr_au` trigger fires `AFTER UPDATE OF ocr_text ON blobs`, keeping the FTS row in
+sync once recognition finishes.
+
+## `0003_packs` -- prompt packs
+
+```sql
+CREATE TABLE packs (
+    id          INTEGER PRIMARY KEY,
+    source_url  TEXT NOT NULL UNIQUE,
+    name        TEXT NOT NULL,
+    description TEXT,
+    imported_at TEXT NOT NULL
+);
+```
+
+`templates` gains three columns: `description`, `variables_json` (a pack manifest's declared
+`{name: {description, default}}` metadata, serialized as-is), and `pack_id` (`REFERENCES packs(id)
+ON DELETE SET NULL`).
+
+A partial unique index, `(pack_id, title) WHERE pack_id IS NOT NULL`, is what makes re-importing a
+pack an upsert instead of a duplicate insert -- standalone templates (`pack_id IS NULL`) are
+unconstrained, since nothing stops a user from creating two templates with the same title on
+their own.

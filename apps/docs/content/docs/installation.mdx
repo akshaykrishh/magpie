@@ -1,0 +1,50 @@
+---
+title: Installation
+description: Build magpie from source, or grab an unsigned build from CI.
+---
+
+There are no signed releases yet -- real code signing needs an Apple Developer ID, which is a
+manual step outside CI (see [Architecture](/docs/architecture)). Two ways to get a working build
+in the meantime:
+
+## Build from source
+
+Requires [Rust](https://www.rust-lang.org/tools/install) (stable) and
+[pnpm](https://pnpm.io/installation). macOS builds also require Xcode Command Line Tools.
+
+```bash
+git clone https://github.com/akshaykrishh/magpie.git
+cd magpie/apps/desktop
+pnpm install
+pnpm tauri dev
+```
+
+`pnpm tauri dev` compiles the Rust core and launches the app with hot reload on the frontend.
+For a release build (produces a `.dmg` on macOS, or a `.deb`/`.AppImage` on Linux):
+
+```bash
+pnpm tauri build
+```
+
+The bundle lands in `target/release/bundle/` at the repo root -- this is a Cargo workspace, so
+every crate (including the desktop app) shares one `target/` directory rather than a per-app one.
+
+## Unsigned CI builds
+
+Every push to `main` builds and bundles the app on both macOS and Ubuntu runners. Unsigned
+artifacts (`.dmg`, `.deb`, `.AppImage`) are attached to each
+[workflow run](https://github.com/akshaykrishh/magpie/actions/workflows/ci.yml) -- useful for
+trying a build without a Rust toolchain, though macOS will still warn about an unidentified
+developer since these aren't notarized.
+
+## The CLI
+
+The CLI (`magpie`) and MCP server binary both build from the same workspace:
+
+```bash
+cargo build --release -p magpie-cli
+# binary at target/release/magpie
+```
+
+See [CLI reference](/docs/cli) for every subcommand, and [MCP integration](/docs/mcp) for wiring
+`magpie serve-mcp` into Claude Code or Cursor.

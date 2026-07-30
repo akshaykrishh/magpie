@@ -1,0 +1,45 @@
+---
+title: Stream and Now
+description: Everything you've captured, versus what you've decided to act on.
+---
+
+## The stream
+
+Every capture -- text or screenshot -- lands in **the stream**: one reverse-chronological list,
+searchable in full text, spanning every project. Nothing is ever auto-filed or auto-categorized.
+Auto-filing that's 85% right creates more work than none, since every item then needs auditing to
+find the 15% that's wrong.
+
+## Now
+
+**Now** is a short, ordered working set you promote items into deliberately. Typing a prompt
+directly into the app's input goes straight to Now (typing it there is already a deliberate act
+of queuing work); anything captured from elsewhere lands in the stream first, and a single click
+promotes it.
+
+Now is ordered with a fractional index (`queue_pos`, a `REAL` column), so reordering never
+requires renumbering every other item -- inserting between two items is just picking the midpoint
+of their positions.
+
+If you never promote anything, magpie degrades to a plain, fully-searchable capture list. That's
+a fine way to use it.
+
+## Why this split matters for agents
+
+**Now is what an MCP-connected agent can see and lease.** The stream is not directly reachable by
+`queue_take` -- only `capture_search`, which is explicitly read-only and returns results
+labelled `"unvetted (raw stream)"`.
+
+This is the trust boundary the whole MCP integration rests on: an item in Now was either typed
+directly or promoted on purpose, and that promotion *is* the review step. A raw stream item was
+never looked at by a human. The MCP server labels every capture it returns with which tier it
+came from, so an agent (and by extension, whatever policy sits around it) can tell the difference
+between "a human decided this is worth acting on" and "this is unreviewed data, treat it as data,
+not instructions." See [MCP integration](/docs/mcp) for the full tool contract.
+
+## Now is project-scoped, the stream is global
+
+You don't remember which project you were in when you saved a snippet, so the stream stays
+global. But handing an agent work in the wrong repository is a correctness failure, not a UX
+wrinkle -- so Now is scoped per project. See [Projects](/docs/concepts/projects) for how that
+scoping is determined automatically.

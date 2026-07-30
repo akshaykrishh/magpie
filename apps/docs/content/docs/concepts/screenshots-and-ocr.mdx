@@ -1,0 +1,42 @@
+---
+title: Screenshots and OCR
+description: Region capture with on-device text recognition, so a screenshot is as searchable as a note.
+---
+
+`Cmd/Ctrl+Shift+Alt+M` captures a region or window and OCRs it in the background, so the
+recognized text joins full-text search -- a screenshot becomes findable by whatever it contains,
+without anyone typing a caption.
+
+## macOS
+
+Region selection shells out to **`screencapture -i`** -- the same interactive picker behind
+Cmd+Shift+4, with window highlighting and marquee selection for free. Text recognition runs
+through the **Vision framework** (`VNRecognizeTextRequest`), on-device, no network call and no
+third-party dependency.
+
+Vision reports one observation per text *region* it detects, not necessarily one per visual line
+-- a row with a wide gap in it (spaced-out terminal or table output) can come back as several
+separate observations for what a person would call one line. magpie groups observations by their
+bounding box (vertical center within half a text-height counts as the same line) before joining
+them, rather than trusting Vision's enumeration order to match reading order.
+
+## Linux
+
+Region selection goes through the **`org.freedesktop.portal.Screenshot`** portal interface
+(`interactive: true`) -- the standardized mechanism across X11 and Wayland, GNOME and KDE alike,
+rather than a hand-rolled X11 selection overlay. Text recognition shells out to **`tesseract`**
+if it's present on `PATH`.
+
+<Callout title="Unverified on real hardware">
+  The Linux path type-checks and passes its unit tests in CI on a real Ubuntu runner, but nobody
+  has run the interactive portal flow on an actual Linux desktop session -- CI has no display or
+  portal daemon to test that part against. Treat it as implemented-to-spec, not yet
+  hands-on-verified. See [Architecture](/docs/architecture).
+</Callout>
+
+## Both platforms report capability honestly
+
+`capabilities()` tells the UI whether screenshot capture and OCR are actually available right
+now -- on Linux, that depends on whether a portal implementing the Screenshot interface is
+reachable and whether `tesseract` is installed, neither of which can be assumed. The app adapts
+rather than showing controls it can't back up.

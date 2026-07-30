@@ -1,0 +1,72 @@
+---
+title: Architecture
+description: How the crates fit together, why SQLite, and what's actually verified versus implemented-but-untested.
+---
+
+## Crate layout
+
+A Rust core owns the domain model. The GUI, CLI, and MCP server are thin clients of it -- this is
+what keeps the MCP server small: it's a few hundred lines because it reuses everything the GUI
+already built.
+
+```
+crates/
+  magpie-core/       domain model, SQLite, FTS5, merge, templates, packs, export, audit
+  magpie-capture/    CaptureBackend trait + macOS / Linux backends
+  magpie-mcp/        the MCP server (library), served by the CLI's serve-mcp
+  magpie-cli/        binary: magpie
+apps/desktop/
+  src-tauri/         Tauri v2 shell -- tray, hotkeys, toast, pinned dock, IPC commands
+  src/                React + Tailwind frontend
+```
+
+`CaptureBackend` is the trait every platform implements: read capturable text, report
+provenance, capture a screenshot region, run OCR. The macOS and Linux implementations differ
+completely underneath (Vision vs. tesseract, `screencapture -i` vs. the freedesktop portal) but
+present the same interface to everything above them -- see
+[Screenshots and OCR](/docs/concepts/screenshots-and-ocr).
+
+## Storage: SQLite, WAL, FTS5
+
+SQLite is the source of truth, in WAL mode, with an FTS5 virtual table over capture bodies and
+OCR text. Three reasons this was decisive:
+
+- **Concurrency.** The GUI, the CLI, and multiple MCP server processes write simultaneously --
+  an agent draining the queue while you type is the normal case, not an edge case. WAL handles
+  multi-process access correctly.
+- **Search.** FTS5 ranks results by relevance (bm25) in milliseconds, even over a large capture
+  history.
+- **Relational data.** Queue order, leases, merge history, and project scoping are joins and
+  transactions, not something a flat file format handles gracefully.
+
+The database lives at a documented, unencrypted, conventional path
+(`~/Library/Application Support/magpie/magpie.db` on macOS, `~/.local/share/magpie/magpie.db` on
+Linux) -- own-your-data is honored through transparency, not through weaker storage. Anyone can
+open it with plain `sqlite3`. See [Schema reference](/docs/schema) for the actual tables.
+
+## Lease correctness
+
+Two MCP sessions can never take the same queue item: `queue_take` runs inside a `BEGIN IMMEDIATE`
+transaction, so SQLite serializes writers rather than letting two leases race. See
+[MCP integration](/docs/mcp) for the full lease lifecycle and why there's deliberately no
+auto-expiry timer.
+
+## What's actually verified
+
+Being specific about this matters more than a general "it works" claim:
+
+| | Status |
+|---|---|
+| Capture core, MCP server, CLI on macOS | Verified live -- built, run, and tested against the real running app throughout development, not just compiled. |
+| Screenshots + OCR on macOS | Verified live. A real bug in Vision's per-region text segmentation (misread as spurious line breaks) was found and fixed against a real capture before being considered done. |
+| Full test suite on Linux (Ubuntu CI) | Verified in CI on every push, including the portal/tesseract backend's unit-testable logic. |
+| Screenshot portal + tesseract OCR on a real Linux desktop | **Not yet verified.** Implemented to match the freedesktop portal specification, type-checks against a Linux target, and its pure logic is unit tested -- but nobody has run the interactive flow on an actual Linux session, since CI has no display or portal daemon. |
+| Code signing / notarization | **Not done.** Needs an Apple Developer ID, which is a manual step outside CI -- see below. |
+
+## Signing
+
+Development happens with a stable self-signed identity so a local Accessibility grant survives
+rebuilds. Real notarization needs an Apple Developer ID ($99/yr), wired into CI once purchased.
+This isn't just a "remove a scary dialog" nicety: macOS ties an Accessibility grant to a binary's
+*signature*, so an unsigned build silently loses one-key capture on every single update -- exactly
+the users who upgrade most. Linux needs none of this.

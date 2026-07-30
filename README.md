@@ -8,8 +8,11 @@ Agents can read and write your queue over MCP.
 On Linux, the full test suite runs and passes in CI on every push, but nobody has yet run the
 actual desktop app on a real Linux machine — that first-hand verification is still outstanding.
 No signed releases yet; CI produces unsigned build artifacts on every push (see Development
-below to build from source in the meantime). See [the design document](docs/design.md) for the
-full architecture and roadmap.
+below to build from source in the meantime).
+
+**Docs: [akshaykrishh.github.io/magpie](https://akshaykrishh.github.io/magpie)** -- installation,
+concepts, the CLI and MCP reference, architecture, and the schema. [docs/design.md](docs/design.md)
+remains the original design record with the full reasoning behind each decision.
 
 ## Why
 

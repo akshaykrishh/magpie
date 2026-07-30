@@ -1,0 +1,48 @@
+---
+title: Quick Start
+description: Capture your first item, promote it into Now, and see it show up over MCP.
+---
+
+## First capture
+
+magpie ships working with **zero permissions**. There's no dialog on first run and no System
+Settings detour -- copy something, then press the hotkey:
+
+- **`Cmd/Ctrl+Shift+M`** -- capture. Reads whatever's on the clipboard (or, if you've since
+  granted Accessibility, synthesizes a copy of the current selection so you don't need to copy
+  first -- see [Concepts](/docs/concepts) for why that's an opt-in upgrade, not the default).
+- **`Cmd/Ctrl+Shift+Alt+M`** -- screenshot capture. Opens the OS's own interactive region-select
+  UI; the resulting image is OCR'd in the background and becomes searchable once recognition
+  finishes.
+
+A small toast confirms the capture without ever taking keyboard focus -- whatever you were typing
+into keeps receiving keystrokes the whole time.
+
+## Promote it into Now
+
+Everything you capture lands in the stream first -- a single reverse-chronological list, nothing
+auto-filed. Open the main window, find the item, and promote it into **Now**: a short, project-scoped
+working queue you curate on purpose. This is the queue an MCP-connected agent actually sees.
+
+## Try the CLI
+
+The same stream is reachable from the terminal:
+
+```bash
+magpie add "check whether the retry logic handles a 429"
+magpie list --now
+magpie search retry
+```
+
+## Hand it to an agent
+
+If you've registered magpie as an MCP server (see [MCP integration](/docs/mcp)), an agent in the
+same project can now see that item:
+
+```
+> what's in my magpie queue for this project?
+```
+
+The agent calls `queue_peek`, sees the item you promoted, and can lease it with `queue_take` to
+start working on it. Every lease, completion, and failure is recorded in the audit log, visible
+in the app's Activity tab.
