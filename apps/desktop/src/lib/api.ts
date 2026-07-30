@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AuditEntry,
+  Blob,
   Capabilities,
   Capture,
   Project,
@@ -87,4 +88,10 @@ export const api = {
     invoke<Capture[]>("instantiate_template_into_many", { templateId, projectIds }),
 
   listAudit: (limit = 50) => invoke<AuditEntry[]>("list_audit", { limit }),
+
+  getCaptureBlob: (captureId: number) =>
+    invoke<Blob | null>("get_capture_blob", { captureId }),
+
+  getBlobImageDataUrl: (captureId: number) =>
+    invoke<string | null>("get_blob_image_data_url", { captureId }),
 };

@@ -46,6 +46,8 @@ impl CaptureBackend for ClipboardBackend {
         Capabilities {
             mode: CaptureMode::ClipboardOnly,
             synthesized_copy_available: cfg!(target_os = "macos"),
+            screenshot_available: false,
+            ocr_available: false,
         }
     }
 
@@ -77,13 +79,13 @@ mod tests {
     // Every test in this crate that touches the real system clipboard or
     // any AppKit/Carbon API is `#[serial]`. Two `Clipboard` instances (or
     // AppKit calls generally) racing on the same shared OS-level state from
-    // parallel test threads crashes the whole process -- reproduced twice
-    // while writing this crate, in two different modules, which is why this
-    // is enforced with a crate-wide lock (see `serial_test`'s docs: its
+    // parallel test threads crashes the whole process, which is why this is
+    // enforced with a crate-wide lock (see `serial_test`'s docs: its
     // default, argument-less `#[serial]` shares one implicit lock across the
-    // *entire* crate, not just within one file) rather than by manually
-    // remembering to keep tests merged or ordered -- that only worked until
-    // the next test that touched shared state was added anywhere else.
+    // *entire* crate, not just within one file) rather than left to each
+    // test file remembering to opt in on its own -- a lock scoped to one
+    // module silently stops protecting anything the moment a conflicting
+    // test exists in another.
     #[test]
     #[serial]
     fn clipboard_backend_reads_reports_freshness_and_provenance() {

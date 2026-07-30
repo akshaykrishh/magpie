@@ -101,8 +101,9 @@ mod tests {
     fn partial_word_matches_as_a_prefix() {
         // A live search box searches on every keystroke -- "term" must
         // match "terminal" immediately, not only once the whole word is
-        // typed. Found by hand: typing into the real search UI showed no
-        // results until the complete word was entered.
+        // typed. Without prefix marking, an unmarked FTS token is an exact-
+        // token match, so a partial word would return nothing until it was
+        // typed in full.
         let store = Store::open_in_memory().unwrap();
         store.capture("fix the terminal capture bug", None).unwrap();
 

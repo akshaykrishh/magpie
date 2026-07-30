@@ -6,9 +6,15 @@ mod toast;
 mod tray;
 
 use tauri::Manager;
-use tauri_plugin_global_shortcut::ShortcutState;
+use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
 
 const HOTKEY: &str = "CommandOrControl+Shift+M";
+/// A modifier variant of the capture hotkey rather than something
+/// unrelated (e.g. Cmd+Shift+S, which would shadow every other app's Save
+/// As while magpie is running) -- the fourth modifier makes collision with
+/// any existing app shortcut essentially impossible while staying
+/// mnemonically paired with the capture hotkey it extends.
+const SCREENSHOT_HOTKEY: &str = "CommandOrControl+Shift+Alt+M";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -21,17 +27,25 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_opener::init())
-        .plugin(
+        .plugin({
+            let capture_shortcut: Shortcut = HOTKEY.parse().expect("invalid hotkey spec");
+            let screenshot_shortcut: Shortcut =
+                SCREENSHOT_HOTKEY.parse().expect("invalid hotkey spec");
             tauri_plugin_global_shortcut::Builder::new()
-                .with_shortcuts([HOTKEY])
+                .with_shortcuts([HOTKEY, SCREENSHOT_HOTKEY])
                 .expect("invalid hotkey spec")
-                .with_handler(|app, _shortcut, event| {
-                    if event.state == ShortcutState::Pressed {
+                .with_handler(move |app, shortcut, event| {
+                    if event.state != ShortcutState::Pressed {
+                        return;
+                    }
+                    if *shortcut == capture_shortcut {
                         capture_flow::on_capture_hotkey(app);
+                    } else if *shortcut == screenshot_shortcut {
+                        capture_flow::on_screenshot_hotkey(app);
                     }
                 })
-                .build(),
-        )
+                .build()
+        })
         .invoke_handler(tauri::generate_handler![
             commands::list_stream,
             commands::list_now,
@@ -62,6 +76,8 @@ pub fn run() {
             commands::instantiate_template,
             commands::instantiate_template_into_many,
             commands::list_audit,
+            commands::get_capture_blob,
+            commands::get_blob_image_data_url,
         ])
         .on_window_event(|window, event| {
             if matches!(window.label(), "main" | "dock") {

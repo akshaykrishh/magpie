@@ -25,8 +25,9 @@ Building toward a first packaged release in stages:
 - **Capture core** — the stream, the `Now` working set, search, merge, tags, projects (done)
 - **MCP server + CLI** — agents can read and write the queue over the Model Context Protocol,
   reusable prompt templates (done)
+- **Screenshots + OCR** — region capture, searchable via on-device text recognition (done on
+  macOS; implemented on Linux but not yet verified on real hardware)
 - **Packaging** — signed, installable builds for macOS and Linux
-- **Screenshots + OCR**
 - **Prompt packs** — shared, git-hosted collections of prompts
 
 See [docs/design.md](docs/design.md) for the full architecture, the reasoning behind each design

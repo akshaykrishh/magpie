@@ -16,7 +16,10 @@ pub fn now_iso() -> String {
         .expect("RFC3339 formatting of a valid OffsetDateTime cannot fail")
 }
 
-const MIGRATIONS: &[(&str, &str)] = &[("0001_init", include_str!("../migrations/0001_init.sql"))];
+const MIGRATIONS: &[(&str, &str)] = &[
+    ("0001_init", include_str!("../migrations/0001_init.sql")),
+    ("0002_screenshots", include_str!("../migrations/0002_screenshots.sql")),
+];
 
 /// `~/Library/Application Support/magpie/magpie.db` on macOS,
 /// `~/.local/share/magpie/magpie.db` on Linux (or `$XDG_DATA_HOME` if set).
@@ -26,6 +29,13 @@ const MIGRATIONS: &[(&str, &str)] = &[("0001_init", include_str!("../migrations/
 /// (GUI, CLI, MCP server), which is what makes them see the same data.
 pub fn default_db_path() -> Option<std::path::PathBuf> {
     dirs::data_dir().map(|d| d.join("magpie").join("magpie.db"))
+}
+
+/// Where screenshot blobs are stored on disk -- a sibling of the database
+/// rather than inside it, since `blobs.path` just needs to point somewhere
+/// stable; SQLite has no business holding image bytes itself.
+pub fn default_blobs_dir() -> Option<std::path::PathBuf> {
+    dirs::data_dir().map(|d| d.join("magpie").join("blobs"))
 }
 
 /// A single connection to the magpie database, safe to share within one

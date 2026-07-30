@@ -1,6 +1,10 @@
+import { listen } from "@tauri-apps/api/event";
 import { formatDistanceToNow } from "date-fns";
 import { ArrowUpToLine, Check, GripVertical, X } from "lucide-react";
-import type { Capture } from "@/lib/types";
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
+import { CAPTURE_UPDATED_EVENT } from "@/lib/events";
+import type { Blob as CaptureBlob, Capture } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface CaptureItemProps {
@@ -28,6 +32,39 @@ export function CaptureItem({
   const timestamp = formatDistanceToNow(new Date(capture.created_at), {
     addSuffix: true,
   });
+
+  const [blob, setBlob] = useState<CaptureBlob | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+
+  // A screenshot capture always has an empty body (see capture_flow.rs's
+  // on_screenshot_hotkey) -- checking that first skips a blob lookup IPC
+  // round trip for the overwhelming common case of a plain text capture.
+  const mightHaveBlob = capture.body === "";
+
+  useEffect(() => {
+    if (!mightHaveBlob) return;
+    let cancelled = false;
+
+    function load() {
+      api.getCaptureBlob(capture.id).then((b) => {
+        if (!cancelled) setBlob(b);
+      });
+      api.getBlobImageDataUrl(capture.id).then((url) => {
+        if (!cancelled) setImageUrl(url);
+      });
+    }
+    load();
+
+    // OCR finishes after the capture already exists -- this is what
+    // updates the "reading text..." placeholder below once it lands.
+    const unlisten = listen<number>(CAPTURE_UPDATED_EVENT, (event) => {
+      if (event.payload === capture.id) load();
+    });
+    return () => {
+      cancelled = true;
+      unlisten.then((f) => f());
+    };
+  }, [capture.id, mightHaveBlob]);
 
   return (
     <div
@@ -58,9 +95,24 @@ export function CaptureItem({
       )}
 
       <div className="min-w-0 flex-1">
-        <p className="whitespace-pre-wrap break-words text-sm leading-snug text-neutral-800 dark:text-neutral-200">
-          {capture.body}
-        </p>
+        {blob ? (
+          <div className="flex flex-col gap-1.5">
+            {imageUrl && (
+              <img
+                src={imageUrl}
+                alt="Screenshot capture"
+                className="max-h-48 w-fit max-w-full rounded-md border border-neutral-200 object-contain dark:border-neutral-800"
+              />
+            )}
+            <p className="whitespace-pre-wrap break-words text-xs leading-snug text-neutral-500 dark:text-neutral-400">
+              {blob.ocr_text ?? "Reading text…"}
+            </p>
+          </div>
+        ) : (
+          <p className="whitespace-pre-wrap break-words text-sm leading-snug text-neutral-800 dark:text-neutral-200">
+            {capture.body}
+          </p>
+        )}
         <p className="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
           {timestamp}
         </p>

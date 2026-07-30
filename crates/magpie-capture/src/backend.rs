@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use serde::Serialize;
 
 use crate::error::Result;
@@ -33,18 +35,37 @@ pub struct Capabilities {
     /// of whether it's currently active -- lets the UI decide whether to
     /// ever offer the upgrade prompt.
     pub synthesized_copy_available: bool,
+    /// Whether `capture_screenshot_region` can do anything on this machine
+    /// right now. Not just a platform check: on Linux this also depends on
+    /// whether a portal implementing the Screenshot interface is actually
+    /// running, which the UI has no other way to know in advance.
+    pub screenshot_available: bool,
+    /// Whether `ocr_image` can do anything on this machine right now.
+    /// Screenshots can still be captured and kept without this -- OCR is
+    /// what makes them searchable, not what makes them capturable.
+    pub ocr_available: bool,
 }
 
-/// A source of capturable text and (where available) provenance for it.
+/// The result of a successful region capture: an image already written to
+/// disk (under the directory `capture_screenshot_region` was asked to use)
+/// plus enough metadata to populate a `blobs` row without re-opening the
+/// file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ScreenshotCapture {
+    pub path: PathBuf,
+    pub mime: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// A source of capturable text, screenshots, and (where available)
+/// provenance for either.
 ///
 /// This is narrower than the trait sketched in docs/design.md: that sketch
-/// also included `register_hotkey` and `screenshot_region`. Hotkey
-/// registration is deliberately left out -- `tauri-plugin-global-shortcut`
-/// already is the cross-platform hotkey abstraction (proven working in the
-/// M0 spike), so a second abstraction on top of it would duplicate work for
-/// no benefit. `screenshot_region` is M4 scope; adding it to the trait now
-/// would just be an unimplemented!() on every M1 backend. Both can be added
-/// here when the milestone that needs them arrives.
+/// also included `register_hotkey`, left out deliberately --
+/// `tauri-plugin-global-shortcut` already is the cross-platform hotkey
+/// abstraction (proven working in the M0 spike), so a second abstraction on
+/// top of it would duplicate work for no benefit.
 pub trait CaptureBackend: Send + Sync {
     fn capabilities(&self) -> Capabilities;
 
@@ -62,12 +83,31 @@ pub trait CaptureBackend: Send + Sync {
     /// Whether a `None` from `read_capture_text` means "a platform security
     /// feature is actively blocking synthetic input" rather than "nothing
     /// was selected". Default `false`; only overridden where such a feature
-    /// exists (macOS's Secure Keyboard Entry, found via manual testing --
-    /// terminals that enable it silently swallow every synthesized
-    /// keystroke, which otherwise looks identical to an empty selection).
-    /// Lets callers report "can't reach this app" instead of a misleading
-    /// "nothing to capture" when that's not actually why it failed.
+    /// exists (macOS's Secure Keyboard Entry, which silently drops every
+    /// synthesized keystroke while active -- otherwise indistinguishable
+    /// from an empty selection). Lets callers report "can't reach this app"
+    /// instead of a misleading "nothing to capture" when that's not
+    /// actually why it failed.
     fn secure_input_blocked(&self) -> bool {
         false
+    }
+
+    /// Let the user select a region (or window) of the screen and save it
+    /// as an image under `dest_dir`. `Ok(None)` means the user cancelled
+    /// the selection -- a normal outcome, not a failure, exactly like
+    /// `read_capture_text`'s `Ok(None)`. Default: not supported on this
+    /// backend.
+    fn capture_screenshot_region(&self, dest_dir: &Path) -> Result<Option<ScreenshotCapture>> {
+        let _ = dest_dir;
+        Ok(None)
+    }
+
+    /// Recognize text in an image file, if this backend has a way to.
+    /// `Ok(None)` covers both "OCR isn't available on this machine" and
+    /// "the image contains no recognizable text" -- neither is an error.
+    /// Default: not supported on this backend.
+    fn ocr_image(&self, path: &Path) -> Result<Option<String>> {
+        let _ = path;
+        Ok(None)
     }
 }

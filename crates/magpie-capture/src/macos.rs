@@ -1,14 +1,19 @@
+use std::path::Path;
 use std::ptr::NonNull;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+use objc2::{AnyThread, ClassType};
 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString, NSWorkspace};
 use objc2_application_services::{AXError, AXUIElement};
 use objc2_core_foundation::{CFRetained, CFString, CFType};
-use objc2_foundation::NSString;
+use objc2_foundation::{NSArray, NSData, NSDictionary, NSString};
+use objc2_vision::{
+    VNImageRequestHandler, VNRecognizeTextRequest, VNRequest, VNRequestTextRecognitionLevel,
+};
 
-use crate::backend::{Capabilities, CaptureBackend, CaptureMode, SourceInfo};
+use crate::backend::{Capabilities, CaptureBackend, CaptureMode, ScreenshotCapture, SourceInfo};
 use crate::error::{Error, Result};
 use crate::freshness::FreshnessTracker;
 
@@ -99,6 +104,8 @@ impl CaptureBackend for MacosBackend {
                 CaptureMode::ClipboardOnly
             },
             synthesized_copy_available: true,
+            screenshot_available: true,
+            ocr_available: true,
         }
     }
 
@@ -126,6 +133,14 @@ impl CaptureBackend for MacosBackend {
 
     fn secure_input_blocked(&self) -> bool {
         is_secure_input_enabled()
+    }
+
+    fn capture_screenshot_region(&self, dest_dir: &Path) -> Result<Option<ScreenshotCapture>> {
+        capture_screenshot_region(dest_dir)
+    }
+
+    fn ocr_image(&self, path: &Path) -> Result<Option<String>> {
+        ocr_image(path)
     }
 }
 
@@ -256,6 +271,151 @@ fn try_synthesize_copy() -> Result<Option<String>> {
     Ok(result)
 }
 
+/// Interactive region/window capture via macOS's own `screencapture -i` --
+/// the same drag-to-select UI behind Cmd+Shift+4, with window highlighting
+/// and marquee selection for free. Reimplementing that selection UI would
+/// duplicate a solved, Apple-maintained problem for no benefit; shelling
+/// out to it is the same choice this crate already makes for reading
+/// capturable text (system tools over reimplementing OS-level UI).
+fn capture_screenshot_region(dest_dir: &Path) -> Result<Option<ScreenshotCapture>> {
+    std::fs::create_dir_all(dest_dir)?;
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let path = dest_dir.join(format!("shot-{millis}.png"));
+
+    let status = std::process::Command::new("screencapture")
+        .arg("-i")
+        .arg(&path)
+        .status()?;
+
+    // `-i` writes nothing at all when the user cancels the selection
+    // (Escape) -- that, not the exit status, is the reliable cancellation
+    // signal. screencapture's exit code on cancel isn't documented as part
+    // of any stable contract, so this doesn't depend on it either way.
+    let file_is_empty_or_missing = std::fs::metadata(&path).map(|m| m.len() == 0).unwrap_or(true);
+    if file_is_empty_or_missing || !status.success() {
+        let _ = std::fs::remove_file(&path);
+        return Ok(None);
+    }
+
+    let (width, height) = crate::png::png_dimensions(&path).unwrap_or((0, 0));
+    Ok(Some(ScreenshotCapture {
+        path,
+        mime: "image/png".to_string(),
+        width,
+        height,
+    }))
+}
+
+/// Text recognition via the Vision framework -- free, built into every
+/// macOS install, no model download or third-party dependency. Runs
+/// synchronously: `performRequests` blocks until Vision has finished, which
+/// is the right shape here since this is already called from a background
+/// thread after the capture itself has completed (see capture_flow.rs).
+fn ocr_image(path: &Path) -> Result<Option<String>> {
+    let bytes = std::fs::read(path)?;
+    let data = NSData::with_bytes(&bytes);
+    let options: objc2::rc::Retained<NSDictionary<NSString, objc2::runtime::AnyObject>> =
+        NSDictionary::from_slices::<NSString>(&[], &[]);
+
+    let handler =
+        VNImageRequestHandler::initWithData_options(VNImageRequestHandler::alloc(), &data, &options);
+
+    let request = VNRecognizeTextRequest::new();
+    request.setRecognitionLevel(VNRequestTextRecognitionLevel::Accurate);
+    request.setUsesLanguageCorrection(true);
+
+    let request_ref: &VNRequest = request.as_super().as_super();
+    let requests = NSArray::from_slice(&[request_ref]);
+
+    handler
+        .performRequests_error(&requests)
+        .map_err(|e| Error::Ocr(e.to_string()))?;
+
+    let Some(observations) = request.results() else {
+        return Ok(None);
+    };
+
+    let mut fragments = Vec::with_capacity(observations.count());
+    for observation in observations.iter() {
+        let candidates = observation.topCandidates(1);
+        let Some(top) = candidates.iter().next() else {
+            continue;
+        };
+        let rect = unsafe { observation.boundingBox() };
+        fragments.push(TextFragment {
+            y_center: rect.origin.y + rect.size.height / 2.0,
+            height: rect.size.height,
+            x_center: rect.origin.x + rect.size.width / 2.0,
+            text: top.string().to_string(),
+        });
+    }
+
+    Ok(assemble_text(fragments))
+}
+
+/// One recognized piece of text plus enough of its `boundingBox` (Vision's
+/// normalized [0,1] coordinates, origin at the image's bottom-left, per
+/// Apple's docs) to know where it sits relative to everything else.
+struct TextFragment {
+    y_center: f64,
+    height: f64,
+    x_center: f64,
+    text: String,
+}
+
+/// Vision emits one `VNRecognizedTextObservation` per text *region* it
+/// detects, not necessarily one per visual line -- a row containing a large
+/// horizontal gap (spaced-out terminal or table output, a status bar) is
+/// liable to come back as several separate observations for what a reader
+/// would call a single line. Joining every observation with a newline would
+/// render that gap as artificial line breaks instead of a single line.
+/// Grouping by vertical center within half a text-height of each other,
+/// then ordering left-to-right within each such group, reconstructs actual
+/// reading order instead of Vision's arbitrary per-region enumeration
+/// order.
+fn assemble_text(mut fragments: Vec<TextFragment>) -> Option<String> {
+    if fragments.is_empty() {
+        return None;
+    }
+
+    // Reading order: top-to-bottom (Vision's y grows upward, so descending
+    // y is top-to-bottom), then left-to-right within whatever line a
+    // fragment ends up grouped into below.
+    fragments.sort_by(|a, b| {
+        b.y_center
+            .partial_cmp(&a.y_center)
+            .unwrap()
+            .then(a.x_center.partial_cmp(&b.x_center).unwrap())
+    });
+
+    let mut lines: Vec<(f64, Vec<TextFragment>)> = Vec::new();
+    for fragment in fragments {
+        match lines.last_mut() {
+            Some((anchor_y, words)) if (*anchor_y - fragment.y_center).abs() < fragment.height / 2.0 => {
+                words.push(fragment);
+            }
+            _ => {
+                let y = fragment.y_center;
+                lines.push((y, vec![fragment]));
+            }
+        }
+    }
+
+    let joined = lines
+        .into_iter()
+        .map(|(_, mut words)| {
+            words.sort_by(|a, b| a.x_center.partial_cmp(&b.x_center).unwrap());
+            words.into_iter().map(|w| w.text).collect::<Vec<_>>().join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Some(joined)
+}
+
 fn post_cmd_c() -> Result<()> {
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .map_err(|_| Error::EventSourceCreation)?;
@@ -278,6 +438,47 @@ mod tests {
     use serial_test::serial;
 
     use super::*;
+
+    fn fragment(y_center: f64, height: f64, x_center: f64, text: &str) -> TextFragment {
+        TextFragment { y_center, height, x_center, text: text.to_string() }
+    }
+
+    #[test]
+    fn assemble_text_joins_same_line_fragments_with_spaces_not_newlines() {
+        // A single visual line containing a wide gap (spaced-out
+        // terminal/table columns, a status bar) commonly comes back from
+        // Vision as several observations at nearly the same vertical
+        // center rather than one -- these should read back as one line.
+        let fragments = vec![
+            fragment(0.50, 0.04, 0.10, "left"),
+            fragment(0.505, 0.04, 0.60, "right"),
+            fragment(0.495, 0.04, 0.35, "middle"),
+        ];
+
+        assert_eq!(
+            assemble_text(fragments).as_deref(),
+            Some("left middle right")
+        );
+    }
+
+    #[test]
+    fn assemble_text_keeps_distinct_rows_on_separate_lines() {
+        let fragments = vec![
+            fragment(0.80, 0.05, 0.10, "first"),
+            fragment(0.20, 0.05, 0.10, "third"),
+            fragment(0.50, 0.05, 0.10, "second"),
+        ];
+
+        assert_eq!(
+            assemble_text(fragments).as_deref(),
+            Some("first\nsecond\nthird")
+        );
+    }
+
+    #[test]
+    fn assemble_text_of_no_fragments_is_none() {
+        assert_eq!(assemble_text(Vec::new()), None);
+    }
 
     // Every test here touches shared macOS/AppKit/Carbon state, and is
     // `#[serial]` for the same reason as clipboard.rs's tests -- see the
@@ -346,6 +547,29 @@ mod tests {
             CaptureMode::ClipboardOnly
         };
         assert_eq!(caps.mode, expected_mode);
+    }
+
+    #[test]
+    #[serial]
+    fn ocr_runs_against_a_real_screen_capture_without_crashing() {
+        // Verified by hand (cargo run -p magpie-capture --example probe --
+        // ocr) that this recognizes real, accurate text from a live
+        // screen. What's asserted here automatically is narrower --
+        // whatever's on screen when CI or a dev machine runs this test is
+        // not something to assert exact content against -- but confirms
+        // the whole Vision FFI path (NSData -> VNImageRequestHandler ->
+        // VNRecognizeTextRequest -> VNRecognizedTextObservation) runs
+        // end-to-end without error on every run, not just this once.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ocr-test.png");
+        let status = std::process::Command::new("screencapture")
+            .arg(&path)
+            .status()
+            .expect("screencapture is always present on macOS");
+        assert!(status.success());
+
+        let result = ocr_image(&path);
+        assert!(result.is_ok(), "OCR should not error: {result:?}");
     }
 
     #[test]

@@ -17,7 +17,12 @@ pub fn make_backend() -> Box<dyn CaptureBackend> {
     Box::new(magpie_capture::MacosBackend::new())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
+pub fn make_backend() -> Box<dyn CaptureBackend> {
+    Box::new(magpie_capture::LinuxBackend::new().expect("failed to initialize clipboard"))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn make_backend() -> Box<dyn CaptureBackend> {
     Box::new(magpie_capture::ClipboardBackend::new().expect("failed to initialize clipboard"))
 }

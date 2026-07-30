@@ -23,6 +23,9 @@ pub enum Error {
     #[error("capture {0} is not leased by session {1}")]
     LeaseMismatch(i64, String),
 
+    #[error("blob {0} not found")]
+    BlobNotFound(i64),
+
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 

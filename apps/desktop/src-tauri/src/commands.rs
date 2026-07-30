@@ -1,5 +1,7 @@
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use magpie_capture::Capabilities;
-use magpie_core::{AuditEntry, Capture, Project, Tag, Template};
+use magpie_core::{AuditEntry, Blob, Capture, Project, Tag, Template};
 use serde::Deserialize;
 use tauri::State;
 
@@ -224,6 +226,31 @@ pub fn instantiate_template_into_many(
 #[tauri::command]
 pub fn list_audit(state: State<AppState>, limit: i64) -> CmdResult<Vec<AuditEntry>> {
     map_err(state.store.list_audit(limit))
+}
+
+#[tauri::command]
+pub fn get_capture_blob(state: State<AppState>, capture_id: i64) -> CmdResult<Option<Blob>> {
+    map_err(state.store.get_blob_for_capture(capture_id))
+}
+
+/// The blob's image bytes, base64-encoded as a `data:` URL the webview can
+/// drop straight into an `<img src>`. Chosen over Tauri's asset protocol
+/// specifically to avoid widening this app's permission surface -- the
+/// asset protocol needs its own filesystem scope declared in
+/// `capabilities/default.json`, where today `core:default` plus
+/// `opener:default` covers everything. Passing image bytes over IPC as a
+/// string is well within what Tauri's IPC handles routinely for a local
+/// desktop app, and needs no new capability grant at all.
+#[tauri::command]
+pub fn get_blob_image_data_url(
+    state: State<AppState>,
+    capture_id: i64,
+) -> CmdResult<Option<String>> {
+    let Some(blob) = map_err(state.store.get_blob_for_capture(capture_id))? else {
+        return Ok(None);
+    };
+    let bytes = std::fs::read(&blob.path).map_err(|e| e.to_string())?;
+    Ok(Some(format!("data:{};base64,{}", blob.mime, BASE64.encode(bytes))))
 }
 
 /// Opens System Settings directly to the Accessibility pane, rather than

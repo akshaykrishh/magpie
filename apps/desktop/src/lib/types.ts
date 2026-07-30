@@ -48,11 +48,23 @@ export interface AuditEntry {
   capture_id: number | null;
 }
 
+export interface Blob {
+  id: number;
+  capture_id: number;
+  path: string;
+  mime: string;
+  width: number | null;
+  height: number | null;
+  ocr_text: string | null;
+}
+
 export type CaptureMode = "clipboard_only" | "synthesized_copy";
 
 export interface Capabilities {
   mode: CaptureMode;
   synthesized_copy_available: boolean;
+  screenshot_available: boolean;
+  ocr_available: boolean;
 }
 
 // Wire type for magpie-core's list_stream project filter -- a tagged enum

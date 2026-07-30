@@ -317,11 +317,23 @@ capture (see "Provenance is tiered" above) answers "which page was this from" wi
 install, permission, or user action, at the cost of the exact URL, which the title mostly makes
 unnecessary. Shipped as part of `magpie-capture`'s macOS backend rather than as its own milestone.
 
-### M4 — screenshots + OCR → `v0.4`
+### M4 — screenshots + OCR → `v0.4` (macOS done and verified; Linux implemented, unverified)
 
 Region-capture hotkey → blob on disk → capture row. OCR into `blobs.ocr_text`, FTS-indexed so
-screenshots are searchable. macOS Vision first (free, excellent, no dependency); Tesseract for
-Linux behind a feature flag.
+screenshots are searchable.
+
+On macOS, region selection shells out to `screencapture -i` -- the same interactive picker behind
+Cmd+Shift+4 -- and OCR runs through the Vision framework (`VNRecognizeTextRequest`). Vision
+returns one observation per text region rather than one per visual line, so results are grouped
+by each observation's bounding box (vertical center within half a text-height counts as the same
+line) before being joined, rather than assuming enumeration order matches reading order.
+
+On Linux, region selection goes through the `org.freedesktop.portal.Screenshot` portal interface
+(`interactive: true`) -- the standardized mechanism across X11 and Wayland, GNOME and KDE alike,
+rather than a hand-rolled X11 selection overlay. OCR shells out to `tesseract` if it's present on
+`PATH`, reported honestly through `capabilities()` when it isn't. This path type-checks against
+the `aarch64-unknown-linux-gnu` target but has not run on a real Linux desktop -- see the note at
+the top of `magpie-capture/src/linux.rs`.
 
 ### M5 — git prompt packs → `v1.0`
 

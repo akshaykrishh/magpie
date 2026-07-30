@@ -1,6 +1,7 @@
 //! Domain model, storage, search, and export for magpie.
 
 mod audit;
+mod blobs;
 mod captures;
 mod db;
 mod error;
@@ -15,8 +16,8 @@ mod tags;
 mod templates;
 
 pub use captures::NewSource;
-pub use db::{default_db_path, now_iso, Store};
+pub use db::{default_blobs_dir, default_db_path, now_iso, Store};
 pub use error::{Error, Result};
 pub use export::CaptureExport;
 pub use lease::LeaseIdentity;
-pub use model::{AuditEntry, Capture, Project, Source, Tag, Template};
+pub use model::{AuditEntry, Blob, Capture, Project, Source, Tag, Template};

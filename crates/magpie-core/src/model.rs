@@ -51,6 +51,17 @@ impl Capture {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Blob {
+    pub id: i64,
+    pub capture_id: i64,
+    pub path: String,
+    pub mime: String,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub ocr_text: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Template {
     pub id: i64,
     pub title: String,
