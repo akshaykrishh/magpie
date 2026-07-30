@@ -4,10 +4,10 @@ An open-source capture tool for AI-assisted work — a to-do list, clipboard, an
 for people who work across ChatGPT, Claude, Cursor, and agent CLIs. Runs on macOS and Linux.
 Agents can read and write your queue over MCP.
 
-`magpie` is a working name, not final.
-
-**Status: pre-alpha.** Nothing here is usable yet. See [the design document](docs/design.md) for
-the full architecture and roadmap.
+**Status: early development.** The capture core, MCP server, and CLI work end-to-end on macOS.
+Linux support is planned but not yet verified, and there are no packaged releases yet — build
+from source (see Development below). See [the design document](docs/design.md) for the full
+architecture and roadmap.
 
 ## Why
 
@@ -20,13 +20,14 @@ hands can empty.
 
 ## Roadmap
 
-Building toward a first real release (`v0.1`) in stages, each one a working, installable app:
+Building toward a first packaged release in stages:
 
-- **Capture core** — the stream, the `Now` working set, search, merge, tags, projects
-- **MCP server + CLI** — agents can read and write the queue over the Model Context Protocol
-- **Browser extension** — exact URL/page provenance with zero OS permissions
+- **Capture core** — the stream, the `Now` working set, search, merge, tags, projects (done)
+- **MCP server + CLI** — agents can read and write the queue over the Model Context Protocol,
+  reusable prompt templates (done)
+- **Packaging** — signed, installable builds for macOS and Linux
 - **Screenshots + OCR**
-- **Prompt templates and packs**
+- **Prompt packs** — shared, git-hosted collections of prompts
 
 See [docs/design.md](docs/design.md) for the full architecture, the reasoning behind each design
 decision, and the current status of each piece.
