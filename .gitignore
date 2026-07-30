@@ -8,6 +8,11 @@ dist/
 # Tauri
 apps/desktop/src-tauri/gen/
 
+# Local MCP registration -- .mcp.json's absolute binary path is
+# machine-specific (points at this checkout's target/debug/magpie), not
+# something to commit for other contributors.
+.mcp.json
+
 # OS
 .DS_Store
 
