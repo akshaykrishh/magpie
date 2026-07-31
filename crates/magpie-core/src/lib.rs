@@ -15,6 +15,7 @@ mod projects;
 mod search;
 mod sections;
 mod sessions;
+mod settings;
 mod sources;
 mod tags;
 mod templates;
