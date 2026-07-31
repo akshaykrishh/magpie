@@ -65,6 +65,19 @@ interface CaptureItemProps {
       omitting it entirely (e.g. any caller not wired to a cursor) never
       shows a highlight. */
   isCursor?: boolean;
+  /** Task 25's keyboard shortcut (the `ContextMenu` key / Shift+F10) opens
+      this exact row's context menu from outside the component, the same way
+      `expandSignal`/`editSignal` reach in for Expand/Edit -- but positioning
+      the menu needs an (x, y) computed from this row's on-screen location
+      (App.tsx reads it via `document.getElementById` and this row's own
+      `id` attribute below), not just a "fire" token, so the mechanism here
+      is a registration callback rather than a signal: on mount, this row
+      hands App.tsx a small function that forwards straight through to
+      `menuOpenRef` -- the identical imperative open the "..." button and
+      right-click already use -- keyed by `capture.id` in a map App.tsx
+      keeps for every visible row, and unregisters it on unmount so a
+      removed/re-filtered row can never be invoked after the fact. */
+  onRegisterMenuOpen?: (id: number, open: ((x: number, y: number) => void) | null) => void;
 }
 
 export function CaptureItem({
@@ -89,6 +102,7 @@ export function CaptureItem({
   expandSignal,
   editSignal,
   isCursor = false,
+  onRegisterMenuOpen,
 }: CaptureItemProps) {
   const timestamp = formatDistanceToNow(new Date(capture.created_at), {
     addSuffix: true,
@@ -217,8 +231,31 @@ export function CaptureItem({
     if (editSignal !== undefined && !currentlyDisabled && currentOnEdit) setEditing(true);
   }, [editSignal]);
 
+  // Task 25: hand App.tsx a stable forwarding function it can key by
+  // capture.id and call from its keyboard-shortcut handler -- forwards
+  // straight through to menuOpenRef, the same imperative open the "..."
+  // button and right-click already use, so the shortcut can never open a
+  // different menu instance than those two. Unregisters on unmount/id
+  // change so a row that's scrolled out of a filtered/re-sorted list can't
+  // be invoked after it's gone.
+  useEffect(() => {
+    if (!onRegisterMenuOpen) return;
+    onRegisterMenuOpen(capture.id, (x, y) => menuOpenRef.current?.(x, y));
+    return () => onRegisterMenuOpen(capture.id, null);
+  }, [capture.id, onRegisterMenuOpen]);
+
   return (
     <div
+      // Only given an id when this row is wired to the keyboard-cursor
+      // mechanism (onRegisterMenuOpen present) -- a promoted capture can be
+      // rendered twice on screen at once (once here, once as its own
+      // separate CaptureItem in NowList's sidebar, which never passes
+      // onRegisterMenuOpen), and NowList has no keyboard cursor of its own
+      // to need this id for. Omitting it there keeps `capture-${id}` unique
+      // in the DOM, so App.tsx's `document.getElementById` lookup for
+      // Task 25's shortcut can't ever resolve to the wrong (sidebar) copy's
+      // bounding rect.
+      id={onRegisterMenuOpen ? `capture-${capture.id}` : undefined}
       onContextMenu={(e) => {
         e.preventDefault();
         menuOpenRef.current?.(e.clientX, e.clientY);

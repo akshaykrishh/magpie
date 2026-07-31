@@ -98,6 +98,7 @@ function SortableSectionGroup({
   rowActions,
   keyboardTrigger,
   cursorId,
+  onRegisterMenuOpen,
 }: {
   section: Section;
   captures: Capture[];
@@ -108,6 +109,7 @@ function SortableSectionGroup({
   rowActions: CaptureRowActions;
   keyboardTrigger: KeyboardRowTrigger | null;
   cursorId: number | null;
+  onRegisterMenuOpen: (id: number, open: ((x: number, y: number) => void) | null) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: section.id,
@@ -146,6 +148,7 @@ function SortableSectionGroup({
             sections={rowActions.sections}
             {...rowSignals(keyboardTrigger, capture.id)}
             isCursor={capture.id === cursorId}
+            onRegisterMenuOpen={onRegisterMenuOpen}
           />
         ))}
       </div>
@@ -201,6 +204,22 @@ function App() {
     nextKeyboardTriggerToken.current += 1;
     setKeyboardTrigger({ id, mode, token: nextKeyboardTriggerToken.current });
   }, []);
+
+  // Task 25's ContextMenu-key/Shift+F10 shortcut: every currently-mounted
+  // row registers its own imperative "open my menu" function here, keyed by
+  // capture id, so the keyboard handler below can look up whichever row is
+  // the current cursor and call straight into the same menuOpenRef the
+  // row's own right-click/"..." button already use -- not a second menu
+  // implementation. A plain ref (not state) because registration churns on
+  // every row mount/unmount and none of it needs to trigger a re-render.
+  const menuRefs = useRef(new Map<number, (x: number, y: number) => void>());
+  const registerMenuOpen = useCallback(
+    (id: number, open: ((x: number, y: number) => void) | null) => {
+      if (open) menuRefs.current.set(id, open);
+      else menuRefs.current.delete(id);
+    },
+    [],
+  );
 
   const showUndoToast = useCallback((message: string, onUndo: () => void) => {
     nextUndoToastId.current += 1;
@@ -591,6 +610,21 @@ function App() {
         handleDeleteCaptures(ids);
       }
     },
+    // Opens the identical per-row context menu right-click/"..." already
+    // open -- batch-vs-single-row targeting and the item set itself are
+    // entirely CaptureItem's own buildContextMenuItems() concern (read at
+    // render time from `selected`), so this handler's only job is finding
+    // the right row's open function and a sane (x, y) for it to appear at.
+    onOpenMenu: (id) => {
+      const open = menuRefs.current.get(id);
+      const rect = document.getElementById(`capture-${id}`)?.getBoundingClientRect();
+      if (!open || !rect) return;
+      // Near the row's own "..." trigger (top-right corner of the row,
+      // where that button actually sits) rather than the row's center --
+      // close enough that the menu visibly belongs to this row without
+      // needing to reach two DOM levels deeper for the button's own rect.
+      open(rect.right - 32, rect.top + 8);
+    },
   });
 
   const showPermissionBanner =
@@ -709,6 +743,7 @@ function App() {
                         sections={rowActions.sections}
                         {...rowSignals(keyboardTrigger, capture.id)}
                         isCursor={capture.id === streamCursor.cursorId}
+                        onRegisterMenuOpen={registerMenuOpen}
                       />
                     ))}
                   </div>
@@ -745,6 +780,7 @@ function App() {
                                   rowActions={rowActions}
                                   keyboardTrigger={keyboardTrigger}
                                   cursorId={streamCursor.cursorId}
+                                  onRegisterMenuOpen={registerMenuOpen}
                                 />
                               ))}
                             </SortableContext>
@@ -774,6 +810,7 @@ function App() {
                             sections={rowActions.sections}
                             {...rowSignals(keyboardTrigger, capture.id)}
                             isCursor={capture.id === streamCursor.cursorId}
+                            onRegisterMenuOpen={registerMenuOpen}
                           />
                         ))}
                       </div>

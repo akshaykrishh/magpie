@@ -35,6 +35,18 @@ export interface ListCursorActions {
       Never fired for Space/Enter/ArrowUp/ArrowDown, which are handled above
       this branch. */
   onAction?: (key: string, id: number) => void;
+  /** The "open context menu" keyboard shortcut (Task 25): the dedicated
+      `ContextMenu`/"Menu" key some keyboards have (`KeyboardEvent.key ===
+      "ContextMenu"`), or its long-standing Shift+F10 equivalent for
+      keyboards without one -- the same pair Windows Explorer, VS Code, and
+      most other desktop apps treat as synonyms for "open the context menu
+      for whatever has focus." Opens the exact same menu right-click already
+      opens on the cursor row, not a separate/parallel one. Handled as its
+      own branch here (like onToggleSelect/onExpand above), rather than
+      folded into onAction, because Shift+F10 needs its own shiftKey check
+      that onAction's generic modifier guard (metaKey/ctrlKey/altKey only)
+      doesn't perform. */
+  onOpenMenu?: (id: number) => void;
 }
 
 export function useListCursor<T extends { id: number }>(
@@ -68,6 +80,9 @@ export function useListCursor<T extends { id: number }>(
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (cursorId !== null) actions.onExpand?.(cursorId);
+    } else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+      e.preventDefault();
+      if (cursorId !== null) actions.onOpenMenu?.(cursorId);
     } else if (cursorId !== null && !e.metaKey && !e.ctrlKey && !e.altKey) {
       // Modifier-held combinations (Cmd/Ctrl/Alt+<letter>) are left alone --
       // e.g. Cmd+C must stay the browser/OS copy shortcut, not this list's
