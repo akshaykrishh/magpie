@@ -2,6 +2,7 @@ import { Pencil, Play, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { Project, Template } from "@/lib/types";
+import { MarkdownBody } from "./MarkdownBody";
 
 interface TemplatesPanelProps {
   onInstantiated: () => void;
@@ -197,9 +198,10 @@ function TemplateCard({
               {template.description}
             </p>
           )}
-          <p className="mt-0.5 line-clamp-2 text-xs text-neutral-500 dark:text-neutral-400">
-            {template.body}
-          </p>
+          <MarkdownBody
+            text={template.body}
+            className="mt-0.5 line-clamp-2 text-xs text-neutral-500 dark:text-neutral-400"
+          />
         </div>
         <div className="flex shrink-0 gap-1">
           <button

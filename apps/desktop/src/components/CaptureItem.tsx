@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { CAPTURE_UPDATED_EVENT } from "@/lib/events";
 import type { Blob as CaptureBlob, Capture } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { MarkdownBody } from "./MarkdownBody";
 
 interface CaptureItemProps {
   capture: Capture;
@@ -104,14 +105,16 @@ export function CaptureItem({
                 className="max-h-48 w-fit max-w-full rounded-md border border-neutral-200 object-contain dark:border-neutral-800"
               />
             )}
-            <p className="whitespace-pre-wrap break-words text-xs leading-snug text-neutral-500 dark:text-neutral-400">
-              {blob.ocr_text ?? "Reading text…"}
-            </p>
+            <MarkdownBody
+              text={blob.ocr_text ?? "Reading text…"}
+              className="text-xs text-neutral-500 dark:text-neutral-400"
+            />
           </div>
         ) : (
-          <p className="whitespace-pre-wrap break-words text-sm leading-snug text-neutral-800 dark:text-neutral-200">
-            {capture.body}
-          </p>
+          <MarkdownBody
+            text={capture.body}
+            className="text-sm text-neutral-800 dark:text-neutral-200"
+          />
         )}
         <p className="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
           {timestamp}
