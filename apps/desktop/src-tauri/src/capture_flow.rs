@@ -7,6 +7,14 @@ use crate::toast::{hide_toast, show_toast, ToastPayload};
 
 const TOAST_VISIBLE_MS: u64 = 1800;
 
+/// How long the capture hotkey can be held before a release stops counting
+/// as "tap to confirm" the guessed project. Matches the 250ms threshold
+/// from the canonical capture-filing design. Holding past this is reserved
+/// for a future "hold to aim" picker (not implemented by this plan) -- for
+/// now it's simply not a tap, so nothing happens and the capture stays in
+/// Inbox.
+const TAP_THRESHOLD: Duration = Duration::from_millis(250);
+
 /// The whole hotkey-to-capture loop: read whatever the active backend can
 /// see right now (clipboard, or a synthesized copy on macOS with
 /// Accessibility granted), insert it with whatever provenance the backend
@@ -57,6 +65,7 @@ pub fn on_capture_hotkey(app: &AppHandle) {
         Ok(capture) => {
             let _ = app.emit("capture:added", ());
             let payload = guess_toast_payload(&state.store, capture.id);
+            record_pending_guess(&state, &payload);
             fire_toast(app, payload);
         }
         Err(e) => {
@@ -181,6 +190,55 @@ fn fire_plain_toast(app: &AppHandle, message: &str) {
             message: message.to_string(),
         },
     );
+}
+
+fn record_pending_guess(state: &AppState, payload: &ToastPayload) {
+    let mut pending = state
+        .pending_guess
+        .lock()
+        .expect("pending_guess mutex poisoned");
+    *pending = match payload {
+        ToastPayload::Guess {
+            capture_id,
+            project_id,
+            ..
+        } => Some(crate::state::PendingGuess {
+            capture_id: *capture_id,
+            project_id: *project_id,
+            pressed_at: std::time::Instant::now(),
+        }),
+        ToastPayload::Plain { .. } => None,
+    };
+}
+
+/// Resolves the gesture `on_capture_hotkey` started: a quick release (within
+/// `TAP_THRESHOLD`) commits the pending guess by calling `assign_project` --
+/// "tap to save" from the canonical capture-filing design. A longer hold, or
+/// no pending guess at all (nothing was captured, or it wasn't a guess),
+/// leaves the capture exactly where `on_capture_hotkey` put it.
+pub fn on_capture_hotkey_released(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let pending = state
+        .pending_guess
+        .lock()
+        .expect("pending_guess mutex poisoned")
+        .take();
+
+    let Some(pending) = pending else {
+        return;
+    };
+    if pending.pressed_at.elapsed() >= TAP_THRESHOLD {
+        return;
+    }
+
+    if let Err(e) = state
+        .store
+        .assign_project(pending.capture_id, Some(pending.project_id))
+    {
+        eprintln!("magpie: failed to confirm guessed project: {e}");
+        return;
+    }
+    let _ = app.emit("capture:updated", pending.capture_id);
 }
 
 /// The desktop app's own guess at where a capture belongs: the single most
