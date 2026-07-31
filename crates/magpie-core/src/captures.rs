@@ -169,6 +169,13 @@ impl Store {
     pub fn update_capture_body(&self, id: i64, body: &str) -> Result<Capture> {
         self.with_conn(|conn| {
             let capture = get_capture_tx(conn, id)?;
+            // A soft-deleted capture must look not-found, same as every other
+            // id-based lookup on captures/templates -- otherwise the UPDATE
+            // below (scoped to `deleted_at IS NULL`) would silently match zero
+            // rows and this would return Ok with the edit discarded.
+            if capture.deleted_at.is_some() {
+                return Err(Error::CaptureNotFound(id));
+            }
             if capture.is_session_digest() {
                 return Err(Error::CannotEditDigest(id));
             }
@@ -559,6 +566,20 @@ mod tests {
 
         let err = store.update_capture_body(digest.id, "edited").unwrap_err();
         assert!(matches!(err, Error::CannotEditDigest(id) if id == digest.id));
+    }
+
+    #[test]
+    fn update_capture_body_treats_a_soft_deleted_capture_as_not_found() {
+        // Consistent with the global rule that every id-based lookup on a
+        // capture/template must include `deleted_at IS NULL`: a soft-deleted
+        // row must error like a genuinely missing one, not silently discard
+        // the edit and return Ok with the unchanged body.
+        let store = Store::open_in_memory().unwrap();
+        let c = store.capture("original", None).unwrap();
+        store.soft_delete_capture(c.id).unwrap();
+
+        let err = store.update_capture_body(c.id, "edited").unwrap_err();
+        assert!(matches!(err, Error::CaptureNotFound(id) if id == c.id));
     }
 
     #[test]
