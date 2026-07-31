@@ -65,7 +65,10 @@ two-way sync is a bug farm.
 ```sql
 projects(id, name, remote_url, common_git_dir, last_active_at)  -- identity from git remote
 sources(id, app_name, bundle_id, window_title, url, captured_at)
-captures(id, body, created_at, done_at, failed_reason,
+captures(id, kind DEFAULT 'capture',  -- 'session_digest' for a synthetic
+                                       -- summary; same table, same stream,
+                                       -- same search -- see "Session digests"
+         body, created_at, done_at, failed_reason,
          queue_pos NULLABLE,      -- non-null ⇒ in Now; value is order
          project_id NULLABLE,     -- null ⇒ Inbox
          branch NULLABLE,         -- non-null ⇒ only matching sessions may take
@@ -75,7 +78,9 @@ captures(id, body, created_at, done_at, failed_reason,
          source_id, merged_into)
 sessions(id, client, pid, project_id, branch, started_at,       -- one row per MCP
          last_active_at, ended_at,                              -- connection; no expiry --
-         leased_count, completed_count, failed_count, handback_count)  -- liveness-ended only
+         leased_count, completed_count, failed_count, handback_count,  -- liveness-ended
+         captures_during_session, unpromoted_at_end)                   -- only; both set once,
+                                                                        -- at end_session time
 templates(id, title, body, created_at)                 -- persist; instantiate into Now
 tags(id, name)  /  capture_tags(capture_id, tag_id)
 blobs(id, capture_id, path, mime, width, height, ocr_text)
@@ -261,6 +266,16 @@ separate review tool or UI exists yet. The diff stat is `git diff --stat` agains
 was HEAD when the item was leased, computed by magpie-mcp itself (never trusted from the agent) --
 the same reasoning as the toast's confidence-aware filing: a number the agent could be wrong about
 is worse than no number, so magpie computes what it can verify and says nothing when it can't.
+
+**Session digests are captures, not a separate feed.** When a session ends (`Store::end_session` --
+called on graceful stdio-close and by the dead-pid sweep, so both recovery paths get this for
+free), magpie writes one summary row into `captures` itself, with `kind = 'session_digest'`
+instead of the default `'capture'`. This is the whole mechanism -- `list_stream`, `capture_search`,
+and the FTS sync triggers all already operate over every row in `captures` with no column-specific
+filtering, so a digest shows up in the stream in chronological order and is searchable exactly like
+anything else, without a UNION query or a second index. It never appears in `Now`/`queue_take`/
+`queue_peek` for the same structural reason an un-promoted capture doesn't: nothing ever calls
+`promote()` on a digest, so its `queue_pos` stays `NULL`.
 
 **Lease and acknowledge, with no auto-expiry.** SQS-style visibility timeouts exist because
 nobody is watching; here there are three items and a human staring at a dock. Worse, timeouts
