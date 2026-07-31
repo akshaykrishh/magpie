@@ -31,12 +31,23 @@
         color: #34c759;
         font-weight: 600;
       }
+      #toast .arrow {
+        opacity: 0.5;
+        margin: 0 2px;
+      }
+      #toast .guess {
+        border-bottom: 1px dashed rgba(255, 255, 255, 0.5);
+      }
     </style>
   </head>
   <body>
     <div id="toast">
       <span class="check">✓</span>
       <span id="msg">Captured</span>
+      <span id="dest" hidden>
+        <span class="arrow">→</span>
+        <span id="dest-name" class="guess"></span>
+      </span>
     </div>
     <script type="module" src="/src/toast.ts"></script>
   </body>
