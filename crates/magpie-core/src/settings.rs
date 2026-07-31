@@ -26,7 +26,6 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::Store;
 
     #[test]
