@@ -18,11 +18,12 @@ fn session_from_row(row: &Row) -> rusqlite::Result<Session> {
         leased_count: row.get("leased_count")?,
         completed_count: row.get("completed_count")?,
         failed_count: row.get("failed_count")?,
+        handback_count: row.get("handback_count")?,
     })
 }
 
 const SESSION_COLUMNS: &str = "id, client, pid, project_id, branch, started_at, \
-     last_active_at, ended_at, leased_count, completed_count, failed_count";
+     last_active_at, ended_at, leased_count, completed_count, failed_count, handback_count";
 
 impl Store {
     /// Records a new MCP connection -- called once, at connection time, by
@@ -156,6 +157,17 @@ pub(crate) fn bump_session_failed_tx(
     Ok(())
 }
 
+pub(crate) fn bump_session_handback_tx(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE sessions SET handback_count = handback_count + 1, last_active_at = ?1 WHERE id = ?2",
+        params![now_iso(), session_id],
+    )?;
+    Ok(())
+}
+
 fn get_session_tx(conn: &rusqlite::Connection, id: &str) -> Result<Session> {
     let sql = format!("SELECT {SESSION_COLUMNS} FROM sessions WHERE id = ?1");
     conn.query_row(&sql, params![id], session_from_row)
@@ -178,6 +190,7 @@ mod tests {
         assert_eq!(s.leased_count, 0);
         assert_eq!(s.completed_count, 0);
         assert_eq!(s.failed_count, 0);
+        assert_eq!(s.handback_count, 0);
     }
 
     #[test]

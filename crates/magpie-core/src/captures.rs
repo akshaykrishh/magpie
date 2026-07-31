@@ -28,6 +28,10 @@ pub(crate) fn capture_from_row(row: &Row) -> rusqlite::Result<Capture> {
         lease_client: row.get("lease_client")?,
         lease_pid: row.get("lease_pid")?,
         lease_at: row.get("lease_at")?,
+        lease_head_commit: row.get("lease_head_commit")?,
+        handback_note: row.get("handback_note")?,
+        diff_stat: row.get("diff_stat")?,
+        handback_at: row.get("handback_at")?,
         source_id: row.get("source_id")?,
         merged_into: row.get("merged_into")?,
     })
@@ -35,7 +39,8 @@ pub(crate) fn capture_from_row(row: &Row) -> rusqlite::Result<Capture> {
 
 pub(crate) const CAPTURE_COLUMNS: &str =
     "id, body, created_at, done_at, failed_reason, queue_pos, \
-     project_id, branch, lease_session, lease_client, lease_pid, lease_at, source_id, merged_into";
+     project_id, branch, lease_session, lease_client, lease_pid, lease_at, lease_head_commit, \
+     handback_note, diff_stat, handback_at, source_id, merged_into";
 
 impl Store {
     /// Capture something into the stream (Inbox: no project until assigned).
@@ -369,6 +374,17 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let err = store.get_capture(999).unwrap_err();
         assert!(matches!(err, Error::CaptureNotFound(999)));
+    }
+
+    #[test]
+    fn new_captures_have_no_lease_or_handback_state() {
+        let store = Store::open_in_memory().unwrap();
+        let c = store.capture("something", None).unwrap();
+        assert!(c.lease_head_commit.is_none());
+        assert!(c.handback_note.is_none());
+        assert!(c.diff_stat.is_none());
+        assert!(c.handback_at.is_none());
+        assert!(!c.needs_review());
     }
 
     #[test]
