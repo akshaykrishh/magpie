@@ -10,7 +10,7 @@ import {
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { emit, listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AddPromptInput } from "./components/AddPromptInput";
 import { AuditView } from "./components/AuditView";
 import { CaptureItem } from "./components/CaptureItem";
@@ -26,6 +26,7 @@ import { UndoToast } from "./components/UndoToast";
 import { api } from "./lib/api";
 import { NOW_CHANGED_EVENT, SECTIONS_CHANGED_EVENT } from "./lib/events";
 import type { Capabilities, Capture, Project, Section } from "./lib/types";
+import { useListCursor } from "./lib/useListCursor";
 import { cn } from "./lib/utils";
 
 // Groups items that carry a `section_id` into per-section buckets (in the
@@ -485,6 +486,23 @@ function App() {
 
   const visibleStream = searchResults ?? stream;
 
+  // The stream cursor must move in the same order the rows actually render
+  // in, not `visibleStream`'s raw order -- once any section has members, the
+  // non-search render below groups all of that section's captures together
+  // (in `sections` order) before the unsectioned leftovers, which can differ
+  // from `stream`'s own interleaving. Search results bypass grouping
+  // entirely (rendered flat, exactly as `searchResults` arrives), so this
+  // only reshapes the non-search case. Built from the same `groupBySection`
+  // helper and the same `sections` filter the render below uses, so the two
+  // can't drift apart on what "visible" means.
+  const streamVisualOrder = useMemo(() => {
+    if (searchResults) return searchResults;
+    const { bySection, unsectioned } = groupBySection(stream);
+    const visibleSections = sections.filter((s) => bySection.has(s.id));
+    return [...visibleSections.flatMap((s) => bySection.get(s.id) ?? []), ...unsectioned];
+  }, [searchResults, stream, sections]);
+  const streamCursor = useListCursor(streamVisualOrder);
+
   const showPermissionBanner =
     !permissionBannerDismissed &&
     capabilities?.mode === "clipboard_only" &&
@@ -568,7 +586,11 @@ function App() {
                 projects={projects}
                 sections={sections}
               />
-              <div className="flex-1 overflow-y-auto">
+              <div
+                tabIndex={0}
+                onKeyDown={streamCursor.onKeyDown}
+                className="flex-1 overflow-y-auto focus:outline-none focus-within:ring-1 focus-within:ring-slate-teal/30"
+              >
                 {visibleStream.length === 0 ? (
                   <p className="px-3 py-6 text-center text-sm text-neutral-400 dark:text-neutral-600">
                     {searchResults ? "No matches." : "Nothing captured yet — try the hotkey."}

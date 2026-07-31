@@ -15,6 +15,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Capture, Section } from "@/lib/types";
+import { useListCursor } from "@/lib/useListCursor";
 import { CaptureItem } from "./CaptureItem";
 import { SectionHeader } from "./SectionHeader";
 
@@ -86,16 +87,33 @@ export function NowList({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  if (items.length === 0) {
-    return (
-      <p className="px-3 py-6 text-center text-sm text-neutral-400 dark:text-neutral-600">
-        Nothing queued. Promote a capture from the stream, or type a prompt to add one directly.
-      </p>
-    );
-  }
-
+  // Computed unconditionally (ahead of the empty-state early return below)
+  // so the useListCursor() call after it never gets skipped on some renders
+  // and not others -- that would violate the rules of hooks the moment
+  // `items` goes from empty to non-empty or back.
   const { bySection, unsectioned } = groupBySection(items);
   const visibleSections = sections.filter((s) => bySection.has(s.id));
+  // Cursor must move in the same order these rows actually render in: all of
+  // a section's members together (in `sections` order), then the
+  // unsectioned leftovers -- not `items`'s own raw order, which can
+  // interleave the two. See the identical comment on App.tsx's
+  // `streamVisualOrder`.
+  const visualOrder = [...visibleSections.flatMap((s) => bySection.get(s.id) ?? []), ...unsectioned];
+  const cursor = useListCursor(visualOrder);
+
+  if (items.length === 0) {
+    return (
+      <div
+        tabIndex={0}
+        onKeyDown={cursor.onKeyDown}
+        className="focus:outline-none focus-within:ring-1 focus-within:ring-slate-teal/30"
+      >
+        <p className="px-3 py-6 text-center text-sm text-neutral-400 dark:text-neutral-600">
+          Nothing queued. Promote a capture from the stream, or type a prompt to add one directly.
+        </p>
+      </div>
+    );
+  }
 
   function handleSectionDragEnd(event: DragEndEvent) {
     const afterId = afterIdFromDragEnd(visibleSections, event);
@@ -110,7 +128,11 @@ export function NowList({
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div
+      tabIndex={0}
+      onKeyDown={cursor.onKeyDown}
+      className="flex flex-col gap-2 focus:outline-none focus-within:ring-1 focus-within:ring-slate-teal/30"
+    >
       {/* Only mounted once a section actually has members -- with no
           sections created, this whole block is absent, not merely empty,
           so the zero-sections render carries none of this task's DnD
