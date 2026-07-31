@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { api } from "./lib/api";
 
@@ -12,40 +13,75 @@ function hasModifier(value: string): boolean {
   return MODIFIER_PATTERN.test(value);
 }
 
-/// The Settings window: currently a read-only-in-effect display of the two
-/// global hotkeys (Save is disabled until Task 28 wires up the actual
-/// rebind command) -- this task's job is just to get the window opening
-/// and showing the live values pulled from `get_hotkey_settings`.
+/// The Settings window: shows the two global hotkeys and lets the user
+/// rebind either one via the `set_hotkey` command. A failed rebind (no
+/// modifier, or the OS refusing registration because another app already
+/// owns the combo) surfaces as a visible inline error rather than a false
+/// success, and the old binding is left in effect -- `set_hotkey` itself
+/// guarantees this by rolling back before returning the error.
 function SettingsApp() {
   const [capture, setCapture] = useState("");
   const [screenshot, setScreenshot] = useState("");
+  // The last values confirmed (by the backend) to actually be registered --
+  // used to know which field(s) changed and need saving, and to resync the
+  // inputs if a save only partially succeeds.
+  const [savedCapture, setSavedCapture] = useState("");
+  const [savedScreenshot, setSavedScreenshot] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [savedMessage, setSavedMessage] = useState<string | null>(null);
+
+  const loadSettings = () =>
+    api.getHotkeySettings().then((settings) => {
+      setCapture(settings.capture);
+      setScreenshot(settings.screenshot);
+      setSavedCapture(settings.capture);
+      setSavedScreenshot(settings.screenshot);
+      setLoaded(true);
+    });
 
   useEffect(() => {
-    api
-      .getHotkeySettings()
-      .then((settings) => {
-        setCapture(settings.capture);
-        setScreenshot(settings.screenshot);
-        setLoaded(true);
-      })
-      .catch((e) => setError(String(e)));
+    loadSettings().catch((e) => setError(String(e)));
   }, []);
 
   const captureValid = hasModifier(capture);
   const screenshotValid = hasModifier(screenshot);
-  const canSave = loaded && captureValid && screenshotValid;
+  const hasChanges = capture !== savedCapture || screenshot !== savedScreenshot;
+  const canSave = loaded && captureValid && screenshotValid && hasChanges && !saving;
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    setSavedMessage(null);
+    try {
+      if (capture !== savedCapture) {
+        await invoke("set_hotkey", { kind: "capture", combo: capture });
+        setSavedCapture(capture);
+      }
+      if (screenshot !== savedScreenshot) {
+        await invoke("set_hotkey", { kind: "screenshot", combo: screenshot });
+        setSavedScreenshot(screenshot);
+      }
+      setSavedMessage("Saved.");
+    } catch (e) {
+      // A failed rebind means the OLD binding is still what's actually
+      // registered (set_hotkey rolls back before erroring) -- re-fetch so
+      // the inputs reflect reality rather than the rejected value,
+      // especially important if the other field's save already succeeded
+      // above before this one failed.
+      setError(String(e));
+      await loadSettings().catch(() => {});
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <main className="flex h-screen flex-col gap-4 overflow-hidden bg-white p-4 dark:bg-neutral-950">
       <h1 className="font-display text-lg font-bold text-ink dark:text-white">Settings</h1>
 
-      {error && (
-        <p className="text-sm text-red-600 dark:text-red-400">
-          Failed to load hotkey settings: {error}
-        </p>
-      )}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
       <label className="flex flex-col gap-1 text-sm text-ink dark:text-neutral-200">
         Capture hotkey
@@ -77,14 +113,17 @@ function SettingsApp() {
         )}
       </label>
 
-      <div className="mt-auto flex justify-end">
+      <div className="mt-auto flex items-center justify-end gap-3">
+        {savedMessage && !error && (
+          <span className="text-sm text-green-700 dark:text-green-400">{savedMessage}</span>
+        )}
         <button
           type="button"
           disabled={!canSave}
-          title="Rebinding lands in a later release"
+          onClick={handleSave}
           className="rounded bg-slate-teal px-3 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-teal-light"
         >
-          Save
+          {saving ? "Saving…" : "Save"}
         </button>
       </div>
     </main>

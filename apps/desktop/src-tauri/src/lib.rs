@@ -7,6 +7,8 @@ mod state;
 mod toast;
 mod tray;
 
+use std::sync::Mutex;
+
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
 
@@ -20,6 +22,23 @@ pub(crate) const HOTKEY: &str = "CommandOrControl+Shift+M";
 /// mnemonically paired with the capture hotkey it extends.
 pub(crate) const SCREENSHOT_HOTKEY: &str = "CommandOrControl+Shift+Alt+M";
 
+/// Tracks which `Shortcut` currently plays the "capture" and "screenshot"
+/// roles, so the single process-wide `with_handler` closure below can tell
+/// which logical action a firing shortcut corresponds to *after*
+/// `settings_commands::set_hotkey` has rebound one of them at runtime.
+///
+/// This has to be mutable, shared state rather than values captured once
+/// when the closure is built: the closure is registered exactly once, at
+/// startup, but `set_hotkey` can swap out the underlying OS-level
+/// registration at any later point. Comparing against a fixed
+/// startup-time `Shortcut` would mean a rebound hotkey's events stop being
+/// routed to `capture_flow` at all -- the OS would still fire the event,
+/// but nothing here would recognize it as "the capture hotkey" anymore.
+pub(crate) struct HotkeyRuntime {
+    pub(crate) capture: Mutex<Shortcut>,
+    pub(crate) screenshot: Mutex<Shortcut>,
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Only reassigned on macOS (below) -- on every other target this
@@ -32,26 +51,53 @@ pub fn run() {
         builder = builder.plugin(tauri_nspanel::init());
     }
 
+    // Opened here -- before the global-shortcut plugin is constructed --
+    // so startup can honor any previously-saved hotkey overrides (written
+    // by `set_hotkey`) instead of always registering the hardcoded
+    // `HOTKEY`/`SCREENSHOT_HOTKEY` consts. A `Store` must only be opened
+    // once per process, so this single instance is threaded through: read
+    // from immediately below to resolve the strings to register, then
+    // moved (not reopened) into `setup()` for `dead_pid_sweep`/
+    // `purge_sweep`/`app.manage()`.
+    let db_path = magpie_core::default_db_path()
+        .expect("could not determine a data directory for this platform");
+    let store = magpie_core::Store::open(&db_path)
+        .unwrap_or_else(|e| panic!("failed to open database at {db_path:?}: {e}"));
+
+    // A `get_setting` error here (as opposed to `Ok(None)`, the ordinary
+    // "never overridden" case) is treated the same as unset rather than
+    // panicking -- failing open to the hardcoded default is preferable to
+    // refusing to start the app over what is, at worst, a stale/corrupt
+    // optional override.
+    let capture_hotkey = store
+        .get_setting("capture_hotkey")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| HOTKEY.to_string());
+    let screenshot_hotkey = store
+        .get_setting("screenshot_hotkey")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| SCREENSHOT_HOTKEY.to_string());
+
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin({
-            let capture_shortcut: Shortcut = HOTKEY.parse().expect("invalid hotkey spec");
-            let screenshot_shortcut: Shortcut =
-                SCREENSHOT_HOTKEY.parse().expect("invalid hotkey spec");
             tauri_plugin_global_shortcut::Builder::new()
-                .with_shortcuts([HOTKEY, SCREENSHOT_HOTKEY])
-                .expect("invalid hotkey spec")
-                .with_handler(move |app, shortcut, event| {
-                    if *shortcut == capture_shortcut {
+                .with_shortcuts([capture_hotkey.as_str(), screenshot_hotkey.as_str()])
+                .expect("invalid hotkey spec (corrupt stored setting?)")
+                .with_handler(|app, shortcut, event| {
+                    let runtime = app.state::<HotkeyRuntime>();
+                    let is_capture = *shortcut == *runtime.capture.lock().unwrap();
+                    let is_screenshot = *shortcut == *runtime.screenshot.lock().unwrap();
+                    if is_capture {
                         if event.state == ShortcutState::Pressed {
                             capture_flow::on_capture_hotkey(app);
                         } else if event.state == ShortcutState::Released {
                             capture_flow::on_capture_hotkey_released(app);
                         }
-                    } else if *shortcut == screenshot_shortcut
-                        && event.state == ShortcutState::Pressed
-                    {
+                    } else if is_screenshot && event.state == ShortcutState::Pressed {
                         capture_flow::on_screenshot_hotkey(app);
                     }
                 })
@@ -111,19 +157,35 @@ pub fn run() {
             commands::list_sessions,
             commands::list_projects_overview,
             settings_commands::get_hotkey_settings,
+            settings_commands::set_hotkey,
         ])
         .on_window_event(|window, event| {
             if matches!(window.label(), "main" | "dock" | "settings") {
                 tray::hide_instead_of_close(window, event);
             }
         })
-        .setup(|app| {
-            let db_path = magpie_core::default_db_path()
-                .expect("could not determine a data directory for this platform");
-            let store = magpie_core::Store::open(&db_path)
-                .unwrap_or_else(|e| panic!("failed to open database at {db_path:?}: {e}"));
+        .setup(move |app| {
+            // `store` was opened above (before the shortcut plugin was
+            // built) so it could be read for startup registration -- it is
+            // moved in here, not reopened, since a `Store` must only be
+            // opened once per process.
             dead_pid_sweep::sweep(&store);
             purge_sweep::sweep(&store);
+
+            // Seeds the runtime lookup the shortcut handler uses to route
+            // events, with the same resolved strings that were just
+            // registered with the OS above -- kept in sync with the OS
+            // registration from here on only by `set_hotkey`.
+            let capture_shortcut: Shortcut = capture_hotkey
+                .parse()
+                .expect("invalid hotkey spec (corrupt stored setting?)");
+            let screenshot_shortcut: Shortcut = screenshot_hotkey
+                .parse()
+                .expect("invalid hotkey spec (corrupt stored setting?)");
+            app.manage(HotkeyRuntime {
+                capture: Mutex::new(capture_shortcut),
+                screenshot: Mutex::new(screenshot_shortcut),
+            });
 
             let backend = state::make_backend();
             app.manage(state::AppState::new(store, backend));
