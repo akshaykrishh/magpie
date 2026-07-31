@@ -24,6 +24,8 @@ pub struct Session {
     pub completed_count: i64,
     pub failed_count: i64,
     pub handback_count: i64,
+    pub captures_during_session: Option<i64>,
+    pub unpromoted_at_end: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -39,6 +41,11 @@ pub struct Source {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Capture {
     pub id: i64,
+    /// `"capture"` for everything a human or agent captured; `"session_digest"`
+    /// for a synthetic summary magpie writes when a session ends (see
+    /// `Store::end_session`). Both live in the same stream and are both
+    /// searchable -- a digest is a special kind of row, not a special table.
+    pub kind: String,
     pub body: String,
     pub created_at: String,
     pub done_at: Option<String>,
@@ -76,6 +83,10 @@ impl Capture {
     /// "needs review" state distinctly from "leased" or "open".
     pub fn needs_review(&self) -> bool {
         self.handback_at.is_some() && self.done_at.is_none()
+    }
+
+    pub fn is_session_digest(&self) -> bool {
+        self.kind == "session_digest"
     }
 }
 

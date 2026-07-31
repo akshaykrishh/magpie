@@ -17,6 +17,7 @@ pub struct NewSource {
 pub(crate) fn capture_from_row(row: &Row) -> rusqlite::Result<Capture> {
     Ok(Capture {
         id: row.get("id")?,
+        kind: row.get("kind")?,
         body: row.get("body")?,
         created_at: row.get("created_at")?,
         done_at: row.get("done_at")?,
@@ -38,7 +39,7 @@ pub(crate) fn capture_from_row(row: &Row) -> rusqlite::Result<Capture> {
 }
 
 pub(crate) const CAPTURE_COLUMNS: &str =
-    "id, body, created_at, done_at, failed_reason, queue_pos, \
+    "id, kind, body, created_at, done_at, failed_reason, queue_pos, \
      project_id, branch, lease_session, lease_client, lease_pid, lease_at, lease_head_commit, \
      handback_note, diff_stat, handback_at, source_id, merged_into";
 
@@ -385,6 +386,14 @@ mod tests {
         assert!(c.diff_stat.is_none());
         assert!(c.handback_at.is_none());
         assert!(!c.needs_review());
+    }
+
+    #[test]
+    fn new_captures_default_to_kind_capture() {
+        let store = Store::open_in_memory().unwrap();
+        let c = store.capture("something", None).unwrap();
+        assert_eq!(c.kind, "capture");
+        assert!(!c.is_session_digest());
     }
 
     #[test]

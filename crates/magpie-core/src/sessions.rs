@@ -19,11 +19,14 @@ fn session_from_row(row: &Row) -> rusqlite::Result<Session> {
         completed_count: row.get("completed_count")?,
         failed_count: row.get("failed_count")?,
         handback_count: row.get("handback_count")?,
+        captures_during_session: row.get("captures_during_session")?,
+        unpromoted_at_end: row.get("unpromoted_at_end")?,
     })
 }
 
 const SESSION_COLUMNS: &str = "id, client, pid, project_id, branch, started_at, \
-     last_active_at, ended_at, leased_count, completed_count, failed_count, handback_count";
+     last_active_at, ended_at, leased_count, completed_count, failed_count, handback_count, \
+     captures_during_session, unpromoted_at_end";
 
 impl Store {
     /// Records a new MCP connection -- called once, at connection time, by
