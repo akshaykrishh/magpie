@@ -124,6 +124,9 @@ impl Store {
     pub fn promote(&self, id: i64) -> Result<Capture> {
         self.with_conn(|conn| {
             let capture = get_capture_tx(conn, id)?;
+            if capture.is_session_digest() {
+                return Err(Error::CannotPromoteDigest(id));
+            }
             let max_pos: Option<f64> = conn.query_row(
                 "SELECT MAX(queue_pos) FROM captures WHERE project_id IS ?1",
                 params![capture.project_id],
@@ -394,6 +397,19 @@ mod tests {
         let c = store.capture("something", None).unwrap();
         assert_eq!(c.kind, "capture");
         assert!(!c.is_session_digest());
+    }
+
+    #[test]
+    fn promote_rejects_a_session_digest() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        store.end_session("sess-1").unwrap();
+
+        let stream = store.list_stream(None, 10, 0).unwrap();
+        let digest = stream.iter().find(|c| c.is_session_digest()).unwrap();
+
+        let err = store.promote(digest.id).unwrap_err();
+        assert!(matches!(err, Error::CannotPromoteDigest(id) if id == digest.id));
     }
 
     #[test]

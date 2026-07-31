@@ -1,4 +1,4 @@
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{params, OptionalExtension, Row, TransactionBehavior};
 
 use crate::db::now_iso;
 use crate::error::Result;
@@ -76,17 +76,18 @@ impl Store {
     /// re-run the counts against a later `now` -- acceptable since the
     /// realistic race is "ends once, from whichever path notices first."
     pub fn end_session(&self, id: &str) -> Result<()> {
-        self.with_conn(|conn| {
-            let session = get_session_tx(conn, id)?;
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let session = get_session_tx(&tx, id)?;
             let now = now_iso();
 
-            let captures_during: i64 = conn.query_row(
+            let captures_during: i64 = tx.query_row(
                 "SELECT COUNT(*) FROM captures
                  WHERE created_at >= ?1 AND created_at <= ?2 AND kind = 'capture'",
                 params![session.started_at, now],
                 |r| r.get(0),
             )?;
-            let unpromoted: i64 = conn.query_row(
+            let unpromoted: i64 = tx.query_row(
                 "SELECT COUNT(*) FROM captures
                  WHERE created_at >= ?1 AND created_at <= ?2 AND kind = 'capture'
                    AND queue_pos IS NULL AND done_at IS NULL",
@@ -94,7 +95,7 @@ impl Store {
                 |r| r.get(0),
             )?;
 
-            conn.execute(
+            tx.execute(
                 "UPDATE sessions
                  SET ended_at = ?1, captures_during_session = ?2, unpromoted_at_end = ?3
                  WHERE id = ?4",
@@ -102,12 +103,13 @@ impl Store {
             )?;
 
             let body = format_digest_body(&session, captures_during, unpromoted);
-            conn.execute(
+            tx.execute(
                 "INSERT INTO captures (kind, body, created_at, project_id, branch)
                  VALUES ('session_digest', ?1, ?2, ?3, ?4)",
                 params![body, now, session.project_id, session.branch],
             )?;
 
+            tx.commit()?;
             Ok(())
         })
     }
