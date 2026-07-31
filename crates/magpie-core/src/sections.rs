@@ -68,11 +68,15 @@ impl Store {
     pub fn reorder_section(&self, id: i64, after_id: Option<i64>) -> Result<Section> {
         self.with_conn(|conn| {
             let after_pos: Option<f64> = match after_id {
-                Some(after_id) => Some(conn.query_row(
-                    "SELECT position FROM sections WHERE id = ?1 AND deleted_at IS NULL",
-                    params![after_id],
-                    |r| r.get(0),
-                )?),
+                Some(after_id) => Some(
+                    conn.query_row(
+                        "SELECT position FROM sections WHERE id = ?1 AND deleted_at IS NULL",
+                        params![after_id],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                    .ok_or(Error::SectionNotFound(after_id))?,
+                ),
                 None => None,
             };
             let next_pos: Option<f64> = conn
@@ -134,8 +138,36 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let a = store.create_section("A").unwrap();
         let b = store.create_section("B").unwrap();
+        let c = store.create_section("C").unwrap();
+
+        // Reorder so position order diverges from insertion/id order:
+        // moving C to the front makes the position order C, A, B while the
+        // id/creation order remains A, B, C.
+        store.reorder_section(c.id, None).unwrap();
+
+        // Soft-delete B directly. `Store` has no `delete_section` method
+        // until a later task, so manipulate the row via raw SQL here --
+        // consistent with how other tests in this codebase reach past the
+        // public API for setup (e.g. blobs.rs's capture-cascade test runs
+        // a raw `DELETE FROM captures`).
+        store
+            .with_conn(|conn| {
+                conn.execute(
+                    "UPDATE sections SET deleted_at = ?1 WHERE id = ?2",
+                    params![now_iso(), b.id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
         let list = store.list_sections().unwrap();
-        assert_eq!(list.iter().map(|s| s.id).collect::<Vec<_>>(), vec![a.id, b.id]);
+        // B is excluded (soft-deleted); C sorts before A by position even
+        // though C was created last and has the highest id -- proving the
+        // ordering is by `position`, not by id/insertion order.
+        assert_eq!(
+            list.iter().map(|s| s.id).collect::<Vec<_>>(),
+            vec![c.id, a.id]
+        );
     }
 
     #[test]
@@ -151,5 +183,13 @@ mod tests {
             list.iter().map(|s| s.id).collect::<Vec<_>>(),
             vec![b.id, c.id, a.id]
         );
+    }
+
+    #[test]
+    fn reorder_section_with_missing_after_id_errors() {
+        let store = Store::open_in_memory().unwrap();
+        let a = store.create_section("A").unwrap();
+        let err = store.reorder_section(a.id, Some(999)).unwrap_err();
+        assert!(matches!(err, Error::SectionNotFound(999)));
     }
 }
