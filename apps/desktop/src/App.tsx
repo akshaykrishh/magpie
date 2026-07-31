@@ -1,3 +1,14 @@
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { emit, listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AddPromptInput } from "./components/AddPromptInput";
@@ -9,12 +20,80 @@ import { NowList } from "./components/NowList";
 import { PermissionBanner } from "./components/PermissionBanner";
 import { RecentlyDeletedView } from "./components/RecentlyDeletedView";
 import { SearchBar } from "./components/SearchBar";
+import { SectionHeader } from "./components/SectionHeader";
 import { TemplatesPanel } from "./components/TemplatesPanel";
 import { UndoToast } from "./components/UndoToast";
 import { api } from "./lib/api";
 import { NOW_CHANGED_EVENT } from "./lib/events";
-import type { Capabilities, Capture } from "./lib/types";
+import type { Capabilities, Capture, Section } from "./lib/types";
 import { cn } from "./lib/utils";
+
+// Groups items that carry a `section_id` into per-section buckets (in the
+// order the items themselves already arrive in) plus a leftover bucket for
+// items with no section -- shared shape used by both the main stream and
+// NowList so "grouped by section, unsectioned items last, no dimension
+// added to their existing order" means the same thing in both places.
+function groupBySection<T extends { section_id: number | null }>(items: T[]) {
+  const bySection = new Map<number, T[]>();
+  const unsectioned: T[] = [];
+  for (const item of items) {
+    if (item.section_id === null) unsectioned.push(item);
+    else bySection.set(item.section_id, [...(bySection.get(item.section_id) ?? []), item]);
+  }
+  return { bySection, unsectioned };
+}
+
+// The section-group analog of NowList's `SortableCaptureItem`: the entire
+// header+members block is the draggable unit (so reordering a section
+// carries its rendered captures along with it), but only the header's grip
+// button is wired as the drag handle.
+function SortableSectionGroup({
+  section,
+  captures,
+  selected,
+  onToggleSelect,
+  onPromote,
+  onRenameSection,
+  onDeleteSection,
+}: {
+  section: Section;
+  captures: Capture[];
+  selected: Set<number>;
+  onToggleSelect: (id: number) => void;
+  onPromote: (id: number) => void;
+  onRenameSection: (id: number, name: string) => void;
+  onDeleteSection: (id: number) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: section.id,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={isDragging ? "opacity-50" : undefined}
+    >
+      <SectionHeader
+        section={section}
+        onRename={(name) => onRenameSection(section.id, name)}
+        onDelete={() => onDeleteSection(section.id)}
+        dragHandleProps={{ ...attributes, ...listeners }}
+      />
+      <div className="mt-2 flex flex-col gap-2">
+        {captures.map((capture) => (
+          <CaptureItem
+            key={capture.id}
+            capture={capture}
+            selected={selected.has(capture.id)}
+            onToggleSelect={onToggleSelect}
+            onPromote={capture.queue_pos === null ? onPromote : undefined}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // Never on first run -- only once the user has felt the two-keystroke
 // friction a few times is the upgrade worth interrupting them for.
@@ -32,6 +111,7 @@ function App() {
   const [view, setView] = useState<View>("captures");
   const [stream, setStream] = useState<Capture[]>([]);
   const [now, setNow] = useState<Capture[]>([]);
+  const [sections, setSections] = useState<Section[]>([]);
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Capture[] | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -79,9 +159,19 @@ function App() {
     api.listNow(null).then(setNow).catch(console.error);
   }, []);
 
+  const refreshSections = useCallback(() => {
+    api.listSections().then(setSections).catch(console.error);
+  }, []);
+
+  const sectionSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
   useEffect(() => {
     refreshStream();
     refreshNow();
+    refreshSections();
     api.captureCapabilities().then(setCapabilities).catch(console.error);
 
     const unlistenCapture = listen("capture:added", () => {
@@ -108,7 +198,7 @@ function App() {
       unlistenCaptureUpdated.then((f) => f());
       unlistenNow.then((f) => f());
     };
-  }, [refreshStream, refreshNow]);
+  }, [refreshStream, refreshNow, refreshSections]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -167,6 +257,48 @@ function App() {
     emit(NOW_CHANGED_EVENT);
   }
 
+  async function handleRenameSection(id: number, name: string) {
+    await api.renameSection(id, name);
+    refreshSections();
+  }
+
+  async function handleDeleteSection(id: number) {
+    await api.deleteSection(id);
+    // Deleting a section only clears its members' section_id -- the
+    // captures themselves aren't touched, so both lists need a refetch to
+    // pick up their new (unsectioned) membership.
+    refreshSections();
+    refreshStream();
+    refreshNow();
+  }
+
+  async function handleReorderSection(id: number, afterId: number | null) {
+    setSections((prev) => {
+      const items = [...prev];
+      const from = items.findIndex((s) => s.id === id);
+      if (from === -1) return prev;
+      const [moved] = items.splice(from, 1);
+      const afterIndex = afterId === null ? -1 : items.findIndex((s) => s.id === afterId);
+      items.splice(afterIndex + 1, 0, moved);
+      return items;
+    });
+    await api.reorderSection(id, afterId);
+    refreshSections();
+  }
+
+  function handleSectionDragEnd(visible: Section[], event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const activeIndex = visible.findIndex((s) => s.id === active.id);
+    const overIndex = visible.findIndex((s) => s.id === over.id);
+    if (activeIndex === -1 || overIndex === -1) return;
+
+    const afterId =
+      activeIndex < overIndex ? visible[overIndex].id : (visible[overIndex - 1]?.id ?? null);
+    handleReorderSection(Number(active.id), afterId);
+  }
+
   async function handleDone(id: number) {
     await api.markCaptureDone(id);
     refreshNow();
@@ -216,6 +348,10 @@ function App() {
               onReorder={handleNowReorder}
               onDone={handleDone}
               onDemote={handleDemote}
+              sections={sections}
+              onRenameSection={handleRenameSection}
+              onDeleteSection={handleDeleteSection}
+              onReorderSection={handleReorderSection}
             />
           </div>
         </aside>
@@ -252,9 +388,11 @@ function App() {
                   <p className="px-3 py-6 text-center text-sm text-neutral-400 dark:text-neutral-600">
                     {searchResults ? "No matches." : "Nothing captured yet — try the hotkey."}
                   </p>
-                ) : (
+                ) : searchResults ? (
+                  // Search ignores section grouping entirely -- it's the existing
+                  // FTS5-ranked flat list, exactly as before this task.
                   <div className="flex flex-col gap-2">
-                    {visibleStream.map((capture) => (
+                    {searchResults.map((capture) => (
                       <CaptureItem
                         key={capture.id}
                         capture={capture}
@@ -264,6 +402,58 @@ function App() {
                       />
                     ))}
                   </div>
+                ) : (
+                  (() => {
+                    const { bySection, unsectioned } = groupBySection(stream);
+                    const visibleSections = sections.filter((s) => bySection.has(s.id));
+                    return (
+                      <div className="flex flex-col gap-2">
+                        {/* Only mounted once a section actually has members --
+                            with no sections created, this whole block is
+                            absent, not merely empty, so the zero-sections
+                            render carries none of this task's DnD scaffolding
+                            at all (matches the pre-Task-19 output exactly). */}
+                        {visibleSections.length > 0 && (
+                          <DndContext
+                            sensors={sectionSensors}
+                            collisionDetection={closestCenter}
+                            onDragEnd={(event) => handleSectionDragEnd(visibleSections, event)}
+                          >
+                            <SortableContext
+                              items={visibleSections.map((s) => s.id)}
+                              strategy={verticalListSortingStrategy}
+                            >
+                              {visibleSections.map((s) => (
+                                <SortableSectionGroup
+                                  key={s.id}
+                                  section={s}
+                                  captures={bySection.get(s.id)!}
+                                  selected={selected}
+                                  onToggleSelect={toggleSelect}
+                                  onPromote={handlePromote}
+                                  onRenameSection={handleRenameSection}
+                                  onDeleteSection={handleDeleteSection}
+                                />
+                              ))}
+                            </SortableContext>
+                          </DndContext>
+                        )}
+                        {/* Unsectioned items render in their existing order with no
+                            header at all -- if you've never created a section, this
+                            branch is the entirety of the list, byte-identical to the
+                            pre-Task-19 flat render below. */}
+                        {unsectioned.map((capture) => (
+                          <CaptureItem
+                            key={capture.id}
+                            capture={capture}
+                            selected={selected.has(capture.id)}
+                            onToggleSelect={toggleSelect}
+                            onPromote={capture.queue_pos === null ? handlePromote : undefined}
+                          />
+                        ))}
+                      </div>
+                    );
+                  })()
                 )}
               </div>
             </div>

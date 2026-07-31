@@ -23,6 +23,8 @@ export interface Capture {
   handback_at: string | null;
   source_id: number | null;
   merged_into: number | null;
+  section_id: number | null;
+  deleted_at: string | null;
 }
 
 export interface Project {

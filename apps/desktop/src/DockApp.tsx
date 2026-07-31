@@ -4,7 +4,7 @@ import { AddPromptInput } from "./components/AddPromptInput";
 import { NowList } from "./components/NowList";
 import { api } from "./lib/api";
 import { NOW_CHANGED_EVENT } from "./lib/events";
-import type { Capture } from "./lib/types";
+import type { Capture, Section } from "./lib/types";
 
 /// The pinned dock: a compact, always-on-top view of Now, meant to sit
 /// beside whatever you're actually working in. Deliberately just Now --
@@ -12,18 +12,24 @@ import type { Capture } from "./lib/types";
 /// is not a replacement for.
 function DockApp() {
   const [now, setNow] = useState<Capture[]>([]);
+  const [sections, setSections] = useState<Section[]>([]);
 
   const refreshNow = useCallback(() => {
     api.listNow(null).then(setNow).catch(console.error);
   }, []);
 
+  const refreshSections = useCallback(() => {
+    api.listSections().then(setSections).catch(console.error);
+  }, []);
+
   useEffect(() => {
     refreshNow();
+    refreshSections();
     const unlisten = listen(NOW_CHANGED_EVENT, refreshNow);
     return () => {
       unlisten.then((f) => f());
     };
-  }, [refreshNow]);
+  }, [refreshNow, refreshSections]);
 
   async function handleAddPrompt(body: string) {
     await api.addTypedCapture(body);
@@ -49,6 +55,31 @@ function DockApp() {
     emit(NOW_CHANGED_EVENT);
   }
 
+  async function handleRenameSection(id: number, name: string) {
+    await api.renameSection(id, name);
+    refreshSections();
+  }
+
+  async function handleDeleteSection(id: number) {
+    await api.deleteSection(id);
+    refreshSections();
+    refreshNow();
+  }
+
+  async function handleReorderSection(id: number, afterId: number | null) {
+    setSections((prev) => {
+      const items = [...prev];
+      const from = items.findIndex((s) => s.id === id);
+      if (from === -1) return prev;
+      const [moved] = items.splice(from, 1);
+      const afterIndex = afterId === null ? -1 : items.findIndex((s) => s.id === afterId);
+      items.splice(afterIndex + 1, 0, moved);
+      return items;
+    });
+    await api.reorderSection(id, afterId);
+    refreshSections();
+  }
+
   return (
     <main className="flex h-screen flex-col gap-2 overflow-hidden bg-white/95 p-2 dark:bg-neutral-950/95">
       <AddPromptInput onAdd={handleAddPrompt} />
@@ -58,6 +89,10 @@ function DockApp() {
           onReorder={handleReorder}
           onDone={handleDone}
           onDemote={handleDemote}
+          sections={sections}
+          onRenameSection={handleRenameSection}
+          onDeleteSection={handleDeleteSection}
+          onReorderSection={handleReorderSection}
         />
       </div>
     </main>
