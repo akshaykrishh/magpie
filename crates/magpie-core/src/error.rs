@@ -11,6 +11,9 @@ pub enum Error {
     #[error("project {0} not found")]
     ProjectNotFound(i64),
 
+    #[error("session {0} not found")]
+    SessionNotFound(String),
+
     #[error("merge needs at least two captures")]
     MergeNeedsAtLeastTwo,
 

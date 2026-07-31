@@ -7,6 +7,23 @@ pub struct Project {
     pub remote_url: Option<String>,
     pub common_git_dir: Option<String>,
     pub created_at: String,
+    pub last_active_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Session {
+    pub id: String,
+    pub client: Option<String>,
+    pub pid: i64,
+    pub project_id: Option<i64>,
+    pub branch: Option<String>,
+    pub started_at: String,
+    pub last_active_at: Option<String>,
+    pub ended_at: Option<String>,
+    pub leased_count: i64,
+    pub completed_count: i64,
+    pub failed_count: i64,
+    pub handback_count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -35,6 +52,11 @@ pub struct Capture {
     pub lease_client: Option<String>,
     pub lease_pid: Option<i64>,
     pub lease_at: Option<String>,
+    pub lease_head_commit: Option<String>,
+
+    pub handback_note: Option<String>,
+    pub diff_stat: Option<String>,
+    pub handback_at: Option<String>,
 
     pub source_id: Option<i64>,
     pub merged_into: Option<i64>,
@@ -47,6 +69,13 @@ impl Capture {
 
     pub fn is_leased(&self) -> bool {
         self.lease_session.is_some()
+    }
+
+    /// A handed-back item stays in Now (it isn't done) but isn't active
+    /// work either -- this is what a future UI checks to render the
+    /// "needs review" state distinctly from "leased" or "open".
+    pub fn needs_review(&self) -> bool {
+        self.handback_at.is_some() && self.done_at.is_none()
     }
 }
 

@@ -85,6 +85,16 @@ struct FailArgs {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct HandbackArgs {
+    id: i64,
+    /// What you did and why it needs a human look before this counts as
+    /// done -- e.g. "renamed the config loader but couldn't verify the
+    /// migration path still works". The diff itself is computed
+    /// automatically; describe the *why*, not the *what changed*.
+    note: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct AddArgs {
     /// The text to capture -- e.g. a note about what you did, a TODO you
     /// found, a link. Lands in the stream for this project, not directly
@@ -120,14 +130,33 @@ pub struct MagpieServer {
 
 #[tool_router]
 impl MagpieServer {
-    pub fn new(store: Arc<Store>, project: &DetectedProject, project_id: Option<i64>) -> Self {
-        Self {
+    pub fn new(
+        store: Arc<Store>,
+        project: &DetectedProject,
+        project_id: Option<i64>,
+    ) -> magpie_core::Result<Self> {
+        let session = uuid::Uuid::new_v4().to_string();
+        let pid = std::process::id() as i64;
+        let branch = project.branch.clone();
+        store.create_session(&session, pid, project_id, branch.as_deref())?;
+        Ok(Self {
             store,
-            session: uuid::Uuid::new_v4().to_string(),
-            pid: std::process::id() as i64,
+            session,
+            pid,
             project_id,
-            branch: project.branch.clone(),
+            branch,
             tool_router: Self::tool_router(),
+        })
+    }
+
+    /// Best-effort activity/client backfill for this session's row --
+    /// failures here are logged, never surfaced as a tool error, since
+    /// session tracking is observability, not correctness (leasing
+    /// correctness never depended on this -- see docs/design.md "MCP
+    /// contract").
+    fn touch_session(&self, client: &str) {
+        if let Err(e) = self.store.touch_session_active(&self.session, client) {
+            eprintln!("magpie: failed to update session activity: {e}");
         }
     }
 
@@ -171,11 +200,21 @@ impl MagpieServer {
         ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_name(&ctx);
+        self.touch_session(&client);
         let identity = self.identity(&client);
         let item = self
             .store
             .queue_take(self.project_id, self.branch.as_deref(), &identity)
-            .map_err(to_error)?
+            .map_err(to_error)?;
+        if let (Some(capture), Some(commit)) = (&item, project::head_commit()) {
+            if let Err(e) =
+                self.store
+                    .record_lease_head_commit(capture.id, &identity.session, &commit)
+            {
+                eprintln!("magpie: failed to record lease head commit: {e}");
+            }
+        }
+        let item = item
             .map(|c| McpCapture::from_capture(&self.store, c, "human-vetted (promoted to Now)"));
         to_json_result(&item)
     }
@@ -187,6 +226,7 @@ impl MagpieServer {
         ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_name(&ctx);
+        self.touch_session(&client);
         self.store
             .capture_complete(args.id, &self.identity(&client).session)
             .map_err(to_error)?;
@@ -203,8 +243,34 @@ impl MagpieServer {
         ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_name(&ctx);
+        self.touch_session(&client);
         self.store
             .capture_fail(args.id, &self.identity(&client).session, &args.reason)
+            .map_err(to_error)?;
+        to_json_result(&serde_json::json!({ "ok": true }))
+    }
+
+    #[tool(
+        description = "Hand a leased item back for human review instead of marking it done -- \
+                        use when you made a real attempt but want a human to look before this \
+                        counts as finished. A diff stat is computed automatically from what \
+                        changed since the item was leased; just explain why it needs a look."
+    )]
+    async fn capture_handback(
+        &self,
+        Parameters(args): Parameters<HandbackArgs>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let client = self.client_name(&ctx);
+        self.touch_session(&client);
+        let session = self.identity(&client).session;
+        let capture = self.store.get_capture(args.id).map_err(to_error)?;
+        let diff_stat = capture
+            .lease_head_commit
+            .as_deref()
+            .and_then(project::diff_stat);
+        self.store
+            .capture_handback(args.id, &session, &args.note, diff_stat.as_deref())
             .map_err(to_error)?;
         to_json_result(&serde_json::json!({ "ok": true }))
     }
@@ -281,12 +347,13 @@ pub async fn serve_stdio(store: Arc<Store>) -> anyhow::Result<()> {
         ),
     };
 
-    let server = MagpieServer::new(store.clone(), &project, project_id);
+    let server = MagpieServer::new(store.clone(), &project, project_id)?;
     let session = server.session.clone();
 
     let running = server.serve(rmcp::transport::stdio()).await?;
     running.waiting().await?;
 
     store.release_leases_for_session(&session)?;
+    store.end_session(&session)?;
     Ok(())
 }

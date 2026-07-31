@@ -29,6 +29,24 @@ pub fn sweep(store: &Store) {
             }
         }
     }
+
+    let sessions = match store.list_active_sessions() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("magpie: could not list active sessions for dead-pid sweep: {e}");
+            return;
+        }
+    };
+
+    for (session_id, pid) in sessions {
+        if !process_is_alive(pid) {
+            if let Err(e) = store.end_session(&session_id) {
+                eprintln!("magpie: failed to end dead session {session_id}: {e}");
+            } else {
+                eprintln!("magpie: ended session {session_id} -- holding process {pid} is gone");
+            }
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -69,5 +87,23 @@ mod tests {
         // PIDs are 16-bit on most systems in practice; this is far outside
         // any real range and shouldn't correspond to a running process.
         assert!(!process_is_alive(i32::MAX as i64));
+    }
+
+    #[test]
+    fn sweep_ends_sessions_whose_pid_is_dead() {
+        let store = magpie_core::Store::open_in_memory().unwrap();
+        store
+            .create_session("sess-dead", i32::MAX as i64, None, None)
+            .unwrap();
+        store
+            .create_session("sess-alive", std::process::id() as i64, None, None)
+            .unwrap();
+
+        sweep(&store);
+
+        let dead = store.get_session("sess-dead").unwrap();
+        assert!(dead.ended_at.is_some());
+        let alive = store.get_session("sess-alive").unwrap();
+        assert!(alive.ended_at.is_none());
     }
 }

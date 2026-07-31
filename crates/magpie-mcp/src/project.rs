@@ -50,6 +50,25 @@ pub fn detect() -> DetectedProject {
     }
 }
 
+/// The current commit, for stamping onto a freshly leased item (see
+/// Store::record_lease_head_commit) so a later handback can diff against
+/// it. `None` outside a repo or if `git` isn't on PATH -- same fallback
+/// `detect()` already uses.
+pub fn head_commit() -> Option<String> {
+    git(&["rev-parse", "HEAD"])
+}
+
+/// A summary of what changed since `against` (typically a `lease_head_commit`)
+/// in the current working tree -- staged, unstaged, and committed changes
+/// all included, since `git diff --stat <ref>` (with no second ref) compares
+/// a single commit against the live working tree rather than two commits.
+/// `None` on any failure (bad ref, no git, not a repo, nothing changed) --
+/// callers treat a missing diff stat as "couldn't compute one", never as an
+/// error (see docs/design.md "MCP contract").
+pub fn diff_stat(against: &str) -> Option<String> {
+    git(&["diff", "--stat", against])
+}
+
 fn git(args: &[&str]) -> Option<String> {
     let output = Command::new("git").args(args).output().ok()?;
     if !output.status.success() {
@@ -121,5 +140,20 @@ mod tests {
         // shelling out to `git` and parsing its output never panics,
         // regardless of context.
         let _ = detect();
+    }
+
+    #[test]
+    fn head_commit_runs_without_panicking_outside_a_repo() {
+        let _ = head_commit();
+    }
+
+    #[test]
+    fn diff_stat_runs_without_panicking_outside_a_repo() {
+        let _ = diff_stat("HEAD");
+    }
+
+    #[test]
+    fn diff_stat_against_garbage_ref_returns_none_not_a_panic() {
+        assert!(diff_stat("not-a-real-ref-xyz").is_none());
     }
 }

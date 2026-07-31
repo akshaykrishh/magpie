@@ -23,6 +23,18 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../migrations/0002_screenshots.sql"),
     ),
     ("0003_packs", include_str!("../migrations/0003_packs.sql")),
+    (
+        "0004_project_recency",
+        include_str!("../migrations/0004_project_recency.sql"),
+    ),
+    (
+        "0005_sessions",
+        include_str!("../migrations/0005_sessions.sql"),
+    ),
+    (
+        "0006_handback",
+        include_str!("../migrations/0006_handback.sql"),
+    ),
 ];
 
 /// `~/Library/Application Support/magpie/magpie.db` on macOS,

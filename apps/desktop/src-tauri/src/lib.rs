@@ -38,12 +38,15 @@ pub fn run() {
                 .with_shortcuts([HOTKEY, SCREENSHOT_HOTKEY])
                 .expect("invalid hotkey spec")
                 .with_handler(move |app, shortcut, event| {
-                    if event.state != ShortcutState::Pressed {
-                        return;
-                    }
                     if *shortcut == capture_shortcut {
-                        capture_flow::on_capture_hotkey(app);
-                    } else if *shortcut == screenshot_shortcut {
+                        if event.state == ShortcutState::Pressed {
+                            capture_flow::on_capture_hotkey(app);
+                        } else if event.state == ShortcutState::Released {
+                            capture_flow::on_capture_hotkey_released(app);
+                        }
+                    } else if *shortcut == screenshot_shortcut
+                        && event.state == ShortcutState::Pressed
+                    {
                         capture_flow::on_screenshot_hotkey(app);
                     }
                 })
@@ -83,6 +86,7 @@ pub fn run() {
             commands::get_blob_image_data_url,
             commands::get_template_variables,
             commands::instantiate_template_with_values,
+            commands::list_sessions,
         ])
         .on_window_event(|window, event| {
             if matches!(window.label(), "main" | "dock") {

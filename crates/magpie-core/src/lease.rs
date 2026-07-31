@@ -44,6 +44,7 @@ impl Store {
                    AND queue_pos IS NOT NULL
                    AND done_at IS NULL
                    AND lease_session IS NULL
+                   AND handback_at IS NULL
                    AND (branch IS NULL OR branch IS ?2)
                  ORDER BY queue_pos ASC
                  LIMIT 1"
@@ -71,10 +72,26 @@ impl Store {
                 ],
             )?;
             record_audit_tx(&tx, &identity.client, "queue_take", Some(candidate.id))?;
+            crate::sessions::bump_session_leased_tx(&tx, &identity.session)?;
 
             let leased = get_capture_tx(&tx, candidate.id)?;
             tx.commit()?;
             Ok(Some(leased))
+        })
+    }
+
+    /// Records the git HEAD at the moment an item was leased, so a later
+    /// `capture_handback` can diff against it -- best-effort, not lease-
+    /// transactional: a mismatched or stale `session` is a silent no-op
+    /// rather than an error, since losing this metadata never blocks the
+    /// agent's actual work (see docs/design.md "MCP contract").
+    pub fn record_lease_head_commit(&self, id: i64, session: &str, commit: &str) -> Result<()> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE captures SET lease_head_commit = ?1 WHERE id = ?2 AND lease_session = ?3",
+                params![commit, id, session],
+            )?;
+            Ok(())
         })
     }
 
@@ -94,6 +111,7 @@ impl Store {
                    AND queue_pos IS NOT NULL
                    AND done_at IS NULL
                    AND lease_session IS NULL
+                   AND handback_at IS NULL
                    AND (branch IS NULL OR branch IS ?2)
                  ORDER BY queue_pos ASC
                  LIMIT ?3"
@@ -107,17 +125,21 @@ impl Store {
     /// Completes a leased item. Must be called by the session holding the
     /// lease -- an agent can't complete work it never took.
     pub fn capture_complete(&self, id: i64, session: &str) -> Result<Capture> {
-        self.with_conn(|conn| {
-            let client = require_lease_tx(conn, id, session)?;
-            conn.execute(
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let client = require_lease_tx(&tx, id, session)?;
+            tx.execute(
                 "UPDATE captures
                  SET done_at = ?1, lease_session = NULL, lease_client = NULL,
-                     lease_pid = NULL, lease_at = NULL
+                     lease_pid = NULL, lease_at = NULL, lease_head_commit = NULL
                  WHERE id = ?2",
                 params![now_iso(), id],
             )?;
-            record_audit_tx(conn, &client, "capture_done", Some(id))?;
-            get_capture_tx(conn, id)
+            record_audit_tx(&tx, &client, "capture_done", Some(id))?;
+            crate::sessions::bump_session_completed_tx(&tx, session)?;
+            let capture = get_capture_tx(&tx, id)?;
+            tx.commit()?;
+            Ok(capture)
         })
     }
 
@@ -127,17 +149,56 @@ impl Store {
     /// mystery you have to investigate. The item stays in Now and is
     /// immediately eligible for `queue_take` again.
     pub fn capture_fail(&self, id: i64, session: &str, reason: &str) -> Result<Capture> {
-        self.with_conn(|conn| {
-            let client = require_lease_tx(conn, id, session)?;
-            conn.execute(
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let client = require_lease_tx(&tx, id, session)?;
+            tx.execute(
                 "UPDATE captures
                  SET failed_reason = ?1, lease_session = NULL, lease_client = NULL,
-                     lease_pid = NULL, lease_at = NULL
+                     lease_pid = NULL, lease_at = NULL, lease_head_commit = NULL
                  WHERE id = ?2",
                 params![reason, id],
             )?;
-            record_audit_tx(conn, &client, "capture_fail", Some(id))?;
-            get_capture_tx(conn, id)
+            record_audit_tx(&tx, &client, "capture_fail", Some(id))?;
+            crate::sessions::bump_session_failed_tx(&tx, session)?;
+            let capture = get_capture_tx(&tx, id)?;
+            tx.commit()?;
+            Ok(capture)
+        })
+    }
+
+    /// A third way to resolve a leased item, alongside `capture_complete`
+    /// and `capture_fail`: the agent made a real attempt but wants a human
+    /// to look before this counts as finished. Stays in Now (unlike
+    /// `capture_complete`) but is excluded from `queue_take`/`queue_peek`
+    /// (unlike `capture_fail`, which is immediately retakeable) -- see
+    /// this query's `handback_at IS NULL` filters. `diff_stat` is whatever
+    /// the caller computed via git; this function never computes it itself
+    /// (see docs/design.md "MCP contract" -- magpie-core never shells out
+    /// to git, only magpie-mcp does).
+    pub fn capture_handback(
+        &self,
+        id: i64,
+        session: &str,
+        note: &str,
+        diff_stat: Option<&str>,
+    ) -> Result<Capture> {
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let client = require_lease_tx(&tx, id, session)?;
+            tx.execute(
+                "UPDATE captures
+                 SET handback_note = ?1, diff_stat = ?2, handback_at = ?3,
+                     lease_session = NULL, lease_client = NULL,
+                     lease_pid = NULL, lease_at = NULL, lease_head_commit = NULL
+                 WHERE id = ?4",
+                params![note, diff_stat, now_iso(), id],
+            )?;
+            record_audit_tx(&tx, &client, "capture_handback", Some(id))?;
+            crate::sessions::bump_session_handback_tx(&tx, session)?;
+            let capture = get_capture_tx(&tx, id)?;
+            tx.commit()?;
+            Ok(capture)
         })
     }
 
@@ -150,7 +211,7 @@ impl Store {
             let n = conn.execute(
                 "UPDATE captures
                  SET lease_session = NULL, lease_client = NULL,
-                     lease_pid = NULL, lease_at = NULL
+                     lease_pid = NULL, lease_at = NULL, lease_head_commit = NULL
                  WHERE lease_session = ?1",
                 params![session],
             )?;
@@ -182,7 +243,7 @@ impl Store {
             conn.execute(
                 "UPDATE captures
                  SET lease_session = NULL, lease_client = NULL,
-                     lease_pid = NULL, lease_at = NULL
+                     lease_pid = NULL, lease_at = NULL, lease_head_commit = NULL
                  WHERE id = ?1",
                 params![id],
             )?;
@@ -406,5 +467,209 @@ mod tests {
         store.release_lease(leases[0].0).unwrap();
         let after = store.get_capture(a.id).unwrap();
         assert!(after.lease_session.is_none());
+    }
+
+    #[test]
+    fn queue_take_bumps_the_taking_sessions_leased_count() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.promote(c.id).unwrap();
+
+        let identity = LeaseIdentity {
+            session: "sess-1".to_string(),
+            client: "claude-code".to_string(),
+            pid: 111,
+        };
+        store.queue_take(None, None, &identity).unwrap();
+
+        let session = store.get_session("sess-1").unwrap();
+        assert_eq!(session.leased_count, 1);
+        assert!(session.last_active_at.is_some());
+    }
+
+    #[test]
+    fn queue_take_does_not_bump_leased_count_when_nothing_is_queued() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+
+        let identity = LeaseIdentity {
+            session: "sess-1".to_string(),
+            client: "claude-code".to_string(),
+            pid: 111,
+        };
+        let result = store.queue_take(None, None, &identity).unwrap();
+        assert!(result.is_none());
+
+        let session = store.get_session("sess-1").unwrap();
+        assert_eq!(session.leased_count, 0);
+    }
+
+    #[test]
+    fn capture_complete_bumps_the_completing_sessions_completed_count() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.promote(c.id).unwrap();
+        let identity = LeaseIdentity {
+            session: "sess-1".to_string(),
+            client: "claude-code".to_string(),
+            pid: 111,
+        };
+        store.queue_take(None, None, &identity).unwrap();
+
+        store.capture_complete(c.id, "sess-1").unwrap();
+
+        let session = store.get_session("sess-1").unwrap();
+        assert_eq!(session.completed_count, 1);
+    }
+
+    #[test]
+    fn capture_fail_bumps_the_failing_sessions_failed_count() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.promote(c.id).unwrap();
+        let identity = LeaseIdentity {
+            session: "sess-1".to_string(),
+            client: "claude-code".to_string(),
+            pid: 111,
+        };
+        store.queue_take(None, None, &identity).unwrap();
+
+        store
+            .capture_fail(c.id, "sess-1", "couldn't find the file")
+            .unwrap();
+
+        let session = store.get_session("sess-1").unwrap();
+        assert_eq!(session.failed_count, 1);
+    }
+
+    #[test]
+    fn capture_handback_clears_the_lease_and_sets_review_fields() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.promote(c.id).unwrap();
+        store.queue_take(None, None, &identity("sess-1")).unwrap();
+
+        let handed_back = store
+            .capture_handback(c.id, "sess-1", "not sure this is right", Some("+64 -11"))
+            .unwrap();
+
+        assert!(handed_back.lease_session.is_none());
+        assert!(handed_back.lease_head_commit.is_none());
+        assert_eq!(
+            handed_back.handback_note.as_deref(),
+            Some("not sure this is right")
+        );
+        assert_eq!(handed_back.diff_stat.as_deref(), Some("+64 -11"));
+        assert!(handed_back.handback_at.is_some());
+        assert!(handed_back.needs_review());
+        assert!(handed_back.in_now(), "a handed-back item stays in Now");
+        assert!(handed_back.done_at.is_none());
+    }
+
+    #[test]
+    fn capture_handback_requires_holding_the_lease() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("s1", 111, None, None).unwrap();
+        store.create_session("s2", 222, None, None).unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.promote(c.id).unwrap();
+        store.queue_take(None, None, &identity("s1")).unwrap();
+
+        let err = store
+            .capture_handback(c.id, "s2", "not my item", None)
+            .unwrap_err();
+        assert!(matches!(err, Error::LeaseMismatch(id, session) if id == c.id && session == "s2"));
+    }
+
+    #[test]
+    fn capture_handback_bumps_the_handback_sessions_handback_count() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.promote(c.id).unwrap();
+        store.queue_take(None, None, &identity("sess-1")).unwrap();
+
+        store
+            .capture_handback(c.id, "sess-1", "note", None)
+            .unwrap();
+
+        let session = store.get_session("sess-1").unwrap();
+        assert_eq!(session.handback_count, 1);
+    }
+
+    #[test]
+    fn handed_back_items_are_invisible_to_queue_take_and_queue_peek() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.promote(c.id).unwrap();
+        store.queue_take(None, None, &identity("sess-1")).unwrap();
+        store
+            .capture_handback(c.id, "sess-1", "note", None)
+            .unwrap();
+
+        assert!(store.queue_peek(None, None, 10).unwrap().is_empty());
+        assert!(store
+            .queue_take(None, None, &identity("sess-1"))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn record_lease_head_commit_only_applies_to_the_holding_session() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("s1", 111, None, None).unwrap();
+        store.create_session("s2", 222, None, None).unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.promote(c.id).unwrap();
+        store.queue_take(None, None, &identity("s1")).unwrap();
+
+        // A mismatched session's attempt to record a head commit is a
+        // silent no-op, not an error -- this is best-effort metadata, not
+        // a correctness-critical write.
+        store
+            .record_lease_head_commit(c.id, "s2", "deadbeef")
+            .unwrap();
+        assert!(store.get_capture(c.id).unwrap().lease_head_commit.is_none());
+
+        store
+            .record_lease_head_commit(c.id, "s1", "deadbeef")
+            .unwrap();
+        assert_eq!(
+            store
+                .get_capture(c.id)
+                .unwrap()
+                .lease_head_commit
+                .as_deref(),
+            Some("deadbeef")
+        );
+    }
+
+    #[test]
+    fn capture_complete_and_capture_fail_clear_lease_head_commit() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        let a = store.capture("a", None).unwrap();
+        let b = store.capture("b", None).unwrap();
+        store.promote(a.id).unwrap();
+        store.promote(b.id).unwrap();
+        store.queue_take(None, None, &identity("sess-1")).unwrap();
+        store
+            .record_lease_head_commit(a.id, "sess-1", "deadbeef")
+            .unwrap();
+        store.queue_take(None, None, &identity("sess-1")).unwrap();
+        store
+            .record_lease_head_commit(b.id, "sess-1", "deadbeef")
+            .unwrap();
+
+        store.capture_complete(a.id, "sess-1").unwrap();
+        store.capture_fail(b.id, "sess-1", "nope").unwrap();
+
+        assert!(store.get_capture(a.id).unwrap().lease_head_commit.is_none());
+        assert!(store.get_capture(b.id).unwrap().lease_head_commit.is_none());
     }
 }

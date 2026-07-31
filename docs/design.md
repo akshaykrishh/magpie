@@ -63,14 +63,19 @@ documented in-repo, and a real `magpie export --format md|json`. No live Markdow
 two-way sync is a bug farm.
 
 ```sql
-projects(id, name, remote_url, common_git_dir)        -- identity from git remote
+projects(id, name, remote_url, common_git_dir, last_active_at)  -- identity from git remote
 sources(id, app_name, bundle_id, window_title, url, captured_at)
 captures(id, body, created_at, done_at, failed_reason,
          queue_pos NULLABLE,      -- non-null ⇒ in Now; value is order
          project_id NULLABLE,     -- null ⇒ Inbox
          branch NULLABLE,         -- non-null ⇒ only matching sessions may take
-         lease_session NULLABLE, lease_client, lease_pid, lease_at,
+         lease_session NULLABLE, lease_client, lease_pid, lease_at, lease_head_commit,
+         handback_note, diff_stat, handback_at,  -- set by capture_handback; diff_stat
+                                                  -- is git-computed, never agent-reported
          source_id, merged_into)
+sessions(id, client, pid, project_id, branch, started_at,       -- one row per MCP
+         last_active_at, ended_at,                              -- connection; no expiry --
+         leased_count, completed_count, failed_count, handback_count)  -- liveness-ended only
 templates(id, title, body, created_at)                 -- persist; instantiate into Now
 tags(id, name)  /  capture_tags(capture_id, tag_id)
 blobs(id, capture_id, path, mime, width, height, ocr_text)
@@ -138,6 +143,14 @@ Several sessions in one project work by construction: `queue_take` leases inside
 
 Auto-follows when one session is live; clickable to switch when several are. Degrades to a plain
 list when nothing is running.
+
+**Sessions persist past the connection.** What used to be an in-memory-only UUID (held by
+`MagpieServer` for the life of one stdio connection) is now a `sessions` row: client name
+(backfilled from MCP's `clientInfo` on the first tool call), pid, project/branch, and running
+counts of items leased/completed/failed. It ends the same two ways leases already recover —
+gracefully on stdio close, or via the dead-pid sweep — never on a timer, for the same
+non-idempotent-consumer reason leases have no expiry. This is what a future dock/main-window UI
+reads to show "who's doing what" instead of reconstructing it from raw lease columns.
 
 ### Capture and permissions
 
@@ -232,13 +245,22 @@ clipboard-watch path is built first, so every platform works from day one.
 Uses [`rmcp`](https://github.com/modelcontextprotocol/rust-sdk), the official Rust SDK, over stdio.
 
 ```
-queue_peek(n)          read-only, for planning across items
-queue_take()           leases exactly ONE item
+queue_peek(n)               read-only, for planning across items
+queue_take()                 leases exactly ONE item
 capture_done(id)
-capture_fail(id, why)  visible and actionable, not a zombie
+capture_fail(id, why)        visible and actionable, not a zombie
+capture_handback(id, note)   done, but wants a human look -- diff stat computed by magpie
 capture_add(text)
 capture_search(query)
 ```
+
+**Handback is a third outcome, not a review workflow.** `capture_handback` clears the lease and
+sets a note plus a diff stat, but the item stays in Now and drops out of `queue_take`/`queue_peek`
+until a human closes it with the same `capture_done` action that closes anything else -- no
+separate review tool or UI exists yet. The diff stat is `git diff --stat` against the commit that
+was HEAD when the item was leased, computed by magpie-mcp itself (never trusted from the agent) --
+the same reasoning as the toast's confidence-aware filing: a number the agent could be wrong about
+is worse than no number, so magpie computes what it can verify and says nothing when it can't.
 
 **Lease and acknowledge, with no auto-expiry.** SQS-style visibility timeouts exist because
 nobody is watching; here there are three items and a human staring at a dock. Worse, timeouts
