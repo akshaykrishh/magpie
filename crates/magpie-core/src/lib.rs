@@ -25,3 +25,4 @@ pub use export::CaptureExport;
 pub use lease::LeaseIdentity;
 pub use model::{AuditEntry, Blob, Capture, Pack, Project, Session, Source, Tag, Template};
 pub use packs::{ParsedPack, ParsedPrompt};
+pub use projects::ProjectOverview;

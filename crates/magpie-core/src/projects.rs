@@ -1,4 +1,5 @@
 use rusqlite::{params, OptionalExtension, Row};
+use serde::Serialize;
 
 use crate::db::now_iso;
 use crate::error::{Error, Result};
@@ -16,8 +17,7 @@ fn project_from_row(row: &Row) -> rusqlite::Result<Project> {
     })
 }
 
-const PROJECT_COLUMNS: &str =
-    "id, name, remote_url, common_git_dir, created_at, last_active_at";
+const PROJECT_COLUMNS: &str = "id, name, remote_url, common_git_dir, created_at, last_active_at";
 
 /// Bump a project's recency signal -- called whenever a capture is filed
 /// into it, so `list_projects_by_recency` reflects "projects I've actually
@@ -118,6 +118,63 @@ impl Store {
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
     }
+
+    /// A per-project rollup for a cross-project view (the canonical
+    /// design's "Across ⌘⌥K" surface -- see docs/design.md): how much is
+    /// queued, how much of that is already claimed, how much is waiting on
+    /// a human, and how many sessions are live right now. Composed
+    /// entirely from `list_now`/`list_sessions`/`list_projects_by_recency`
+    /// rather than new SQL, so it can never drift out of sync with what
+    /// those already guarantee. Inbox is always first, even with zero
+    /// projects -- captures with no project are a real queue of their own.
+    pub fn list_projects_overview(&self) -> Result<Vec<ProjectOverview>> {
+        let all_sessions = self.list_sessions(None)?;
+        let active_sessions_for = |project_id: Option<i64>| {
+            all_sessions
+                .iter()
+                .filter(|s| s.project_id == project_id && s.ended_at.is_none())
+                .count() as i64
+        };
+
+        let mut overviews = Vec::new();
+
+        let inbox_now = self.list_now(None)?;
+        overviews.push(ProjectOverview {
+            project_id: None,
+            project_name: "Inbox".to_string(),
+            now_count: inbox_now.len() as i64,
+            leased_count: inbox_now.iter().filter(|c| c.is_leased()).count() as i64,
+            needs_review_count: inbox_now.iter().filter(|c| c.needs_review()).count() as i64,
+            active_session_count: active_sessions_for(None),
+        });
+
+        // A generous upper bound rather than a true "no limit" --
+        // list_projects_by_recency always takes one; no real user has
+        // anywhere near this many projects.
+        for project in self.list_projects_by_recency(10_000)? {
+            let now_items = self.list_now(Some(project.id))?;
+            overviews.push(ProjectOverview {
+                project_id: Some(project.id),
+                project_name: project.name.clone(),
+                now_count: now_items.len() as i64,
+                leased_count: now_items.iter().filter(|c| c.is_leased()).count() as i64,
+                needs_review_count: now_items.iter().filter(|c| c.needs_review()).count() as i64,
+                active_session_count: active_sessions_for(Some(project.id)),
+            });
+        }
+
+        Ok(overviews)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ProjectOverview {
+    pub project_id: Option<i64>,
+    pub project_name: String,
+    pub now_count: i64,
+    pub leased_count: i64,
+    pub needs_review_count: i64,
+    pub active_session_count: i64,
 }
 
 #[cfg(test)]
@@ -221,5 +278,106 @@ mod tests {
             .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
             .unwrap();
         assert!(p.last_active_at.is_some());
+    }
+
+    #[test]
+    fn list_projects_overview_includes_inbox_even_with_no_projects() {
+        let store = Store::open_in_memory().unwrap();
+        let overview = store.list_projects_overview().unwrap();
+        assert_eq!(overview.len(), 1);
+        assert_eq!(overview[0].project_id, None);
+        assert_eq!(overview[0].project_name, "Inbox");
+        assert_eq!(overview[0].now_count, 0);
+    }
+
+    #[test]
+    fn list_projects_overview_counts_now_leased_and_needs_review() {
+        let store = Store::open_in_memory().unwrap();
+        let proj = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        store
+            .create_session("sess-1", 111, Some(proj.id), None)
+            .unwrap();
+        let identity = crate::lease::LeaseIdentity {
+            session: "sess-1".to_string(),
+            client: "claude-code".to_string(),
+            pid: 111,
+        };
+
+        // Leased and stays leased -- taken immediately while it's the only
+        // item available, so ordering can't put the wrong item in its hands.
+        let leased_item = store.capture("leased", None).unwrap();
+        store.assign_project(leased_item.id, Some(proj.id)).unwrap();
+        store.promote(leased_item.id).unwrap();
+        store.queue_take(Some(proj.id), None, &identity).unwrap();
+
+        // Leased, then handed back for review.
+        let review_item = store.capture("review", None).unwrap();
+        store.assign_project(review_item.id, Some(proj.id)).unwrap();
+        store.promote(review_item.id).unwrap();
+        store.queue_take(Some(proj.id), None, &identity).unwrap();
+        store
+            .capture_handback(review_item.id, "sess-1", "note", None)
+            .unwrap();
+
+        // Stays open, never leased -- promoted last so it's never the
+        // candidate either of the two queue_take calls above would reach.
+        let open_item = store.capture("open", None).unwrap();
+        store.assign_project(open_item.id, Some(proj.id)).unwrap();
+        store.promote(open_item.id).unwrap();
+
+        let overview = store.list_projects_overview().unwrap();
+        let proj_overview = overview
+            .iter()
+            .find(|o| o.project_id == Some(proj.id))
+            .unwrap();
+        assert_eq!(proj_overview.now_count, 3);
+        assert_eq!(proj_overview.leased_count, 1);
+        assert_eq!(proj_overview.needs_review_count, 1);
+    }
+
+    #[test]
+    fn list_projects_overview_counts_only_active_sessions() {
+        let store = Store::open_in_memory().unwrap();
+        let proj = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        store
+            .create_session("sess-1", 111, Some(proj.id), None)
+            .unwrap();
+        store
+            .create_session("sess-2", 222, Some(proj.id), None)
+            .unwrap();
+        store.end_session("sess-2").unwrap();
+
+        let overview = store.list_projects_overview().unwrap();
+        let proj_overview = overview
+            .iter()
+            .find(|o| o.project_id == Some(proj.id))
+            .unwrap();
+        assert_eq!(proj_overview.active_session_count, 1);
+    }
+
+    #[test]
+    fn list_projects_overview_orders_projects_by_recency_after_inbox() {
+        let store = Store::open_in_memory().unwrap();
+        let a = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        let b = store
+            .get_or_create_project("b", Some("git@github.com:x/b.git"), None)
+            .unwrap();
+        // Re-touch a so it outranks b despite being created (and thus
+        // having a lower id) first -- same fixture shape as
+        // list_projects_by_recency_orders_touched_projects_first, above.
+        store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+
+        let overview = store.list_projects_overview().unwrap();
+        assert_eq!(overview[0].project_id, None, "Inbox is always first");
+        assert_eq!(overview[1].project_id, Some(a.id));
+        assert_eq!(overview[2].project_id, Some(b.id));
     }
 }
