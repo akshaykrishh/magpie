@@ -47,10 +47,25 @@ impl Store {
         })
     }
 
+    /// Soft-delete: hidden immediately, recoverable via `restore_template`
+    /// or the Recently Deleted view until the purge sweep hard-deletes it.
     pub fn delete_template(&self, id: i64) -> Result<()> {
         self.with_conn(|conn| {
-            conn.execute("DELETE FROM templates WHERE id = ?1", params![id])?;
+            conn.execute(
+                "UPDATE templates SET deleted_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+                params![now_iso(), id],
+            )?;
             Ok(())
+        })
+    }
+
+    pub fn restore_template(&self, id: i64) -> Result<Template> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE templates SET deleted_at = NULL WHERE id = ?1",
+                params![id],
+            )?;
+            get_template_tx(conn, id)
         })
     }
 
@@ -60,7 +75,26 @@ impl Store {
 
     pub fn list_templates(&self) -> Result<Vec<Template>> {
         self.with_conn(|conn| {
-            let sql = format!("SELECT {TEMPLATE_COLUMNS} FROM templates ORDER BY created_at DESC");
+            let sql = format!(
+                "SELECT {TEMPLATE_COLUMNS} FROM templates
+                 WHERE deleted_at IS NULL ORDER BY created_at DESC"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map([], template_from_row)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
+    /// `deleted_at IS NOT NULL` is the only filter needed here: unlike
+    /// captures, templates have no merge/absorption concept, so there's no
+    /// analogous "absorbed row" to exclude. `pack_id` just tags a
+    /// template's origin pack -- it doesn't affect visibility here.
+    pub fn list_recently_deleted_templates(&self) -> Result<Vec<Template>> {
+        self.with_conn(|conn| {
+            let sql = format!(
+                "SELECT {TEMPLATE_COLUMNS} FROM templates
+                 WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"
+            );
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map([], template_from_row)?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -215,10 +249,10 @@ mod tests {
         assert_eq!(updated.body, "Review strictly");
 
         store.delete_template(t.id).unwrap();
-        assert!(matches!(
-            store.get_template(t.id).unwrap_err(),
-            Error::TemplateNotFound(_)
-        ));
+        // Soft-delete: the row survives (recoverable via restore_template),
+        // it's just hidden from the active list.
+        assert!(store.get_template(t.id).unwrap().deleted_at.is_some());
+        assert!(store.list_templates().unwrap().is_empty());
     }
 
     #[test]
@@ -283,5 +317,28 @@ mod tests {
         let s = store.create_section("Prompts").unwrap();
         let assigned = store.assign_template_section(t.id, Some(s.id)).unwrap();
         assert_eq!(assigned.section_id, Some(s.id));
+    }
+
+    #[test]
+    fn delete_template_is_soft_and_restore_reverses_it() {
+        let store = Store::open_in_memory().unwrap();
+        let t = store.create_template("title", "body").unwrap();
+
+        store.delete_template(t.id).unwrap();
+        assert!(store.list_templates().unwrap().is_empty());
+
+        let restored = store.restore_template(t.id).unwrap();
+        assert_eq!(restored.deleted_at, None);
+        assert_eq!(store.list_templates().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn list_recently_deleted_templates_returns_only_deleted_ones() {
+        let store = Store::open_in_memory().unwrap();
+        let t = store.create_template("title", "body").unwrap();
+        store.delete_template(t.id).unwrap();
+        let deleted = store.list_recently_deleted_templates().unwrap();
+        assert_eq!(deleted.len(), 1);
+        assert_eq!(deleted[0].id, t.id);
     }
 }
