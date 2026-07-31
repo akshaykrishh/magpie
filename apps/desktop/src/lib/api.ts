@@ -6,6 +6,8 @@ import type {
   Capture,
   Project,
   ProjectFilter,
+  ProjectOverview,
+  Session,
   Tag,
   Template,
 } from "./types";
@@ -63,6 +65,11 @@ export const api = {
       remoteUrl,
       commonGitDir,
     }),
+
+  listSessions: (projectId: number | null) =>
+    invoke<Session[]>("list_sessions", { projectId }),
+
+  listProjectsOverview: () => invoke<ProjectOverview[]>("list_projects_overview"),
 
   exportJson: () => invoke<string>("export_json"),
   exportMarkdown: () => invoke<string>("export_markdown"),
