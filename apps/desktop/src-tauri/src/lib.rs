@@ -87,6 +87,7 @@ pub fn run() {
             commands::get_template_variables,
             commands::instantiate_template_with_values,
             commands::list_sessions,
+            commands::list_projects_overview,
         ])
         .on_window_event(|window, event| {
             if matches!(window.label(), "main" | "dock") {
