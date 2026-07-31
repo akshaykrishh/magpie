@@ -157,6 +157,15 @@ gracefully on stdio close, or via the dead-pid sweep — never on a timer, for t
 non-idempotent-consumer reason leases have no expiry. This is what a future dock/main-window UI
 reads to show "who's doing what" instead of reconstructing it from raw lease columns.
 
+**Across is the cross-project rollup, not a fourth queue.** The canonical design's "Across (⌘⌥K)"
+surface needs one read that answers "what needs a look, across every project" without giving up
+per-project scoping -- `Store::list_projects_overview` is that read. Inbox comes first (a queue of
+its own, even without a project), then every project ordered by the same recency signal the dock
+already uses, each annotated with how much is queued, how much is already claimed, how much is
+waiting on a human, and how many sessions are live right now. It's composed entirely from
+`list_now`/`list_sessions`/`list_projects_by_recency` -- no new table, no new query logic that
+could drift out of sync with what those already guarantee.
+
 ### Capture and permissions
 
 **Ships working with zero permissions.** Copy, then hotkey. No dialog on first run, no System
