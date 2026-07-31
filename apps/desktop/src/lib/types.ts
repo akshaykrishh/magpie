@@ -87,6 +87,8 @@ export interface Template {
   description: string | null;
   variables_json: string | null;
   pack_id: number | null;
+  section_id: number | null;
+  deleted_at: string | null;
 }
 
 export interface AuditEntry {
