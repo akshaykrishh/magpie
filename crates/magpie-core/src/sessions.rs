@@ -83,8 +83,9 @@ impl Store {
     pub fn list_active_sessions(&self) -> Result<Vec<(String, i64)>> {
         self.with_conn(|conn| {
             let mut stmt = conn.prepare("SELECT id, pid FROM sessions WHERE ended_at IS NULL")?;
-            let rows =
-                stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
     }
@@ -96,7 +97,7 @@ impl Store {
             let sql = format!(
                 "SELECT {SESSION_COLUMNS} FROM sessions
                  WHERE ?1 = 0 OR project_id IS ?2
-                 ORDER BY started_at DESC"
+                 ORDER BY started_at DESC, rowid DESC"
             );
             let mut stmt = conn.prepare(&sql)?;
             let filter_on = project_id.is_some();
