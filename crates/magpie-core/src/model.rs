@@ -67,6 +67,8 @@ pub struct Capture {
 
     pub source_id: Option<i64>,
     pub merged_into: Option<i64>,
+    pub section_id: Option<i64>,
+    pub deleted_at: Option<String>,
 }
 
 impl Capture {
@@ -115,6 +117,8 @@ pub struct Template {
     /// labels do (see `docs/design.md` for the manifest shape).
     pub variables_json: Option<String>,
     pub pack_id: Option<i64>,
+    pub section_id: Option<i64>,
+    pub deleted_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -130,6 +134,15 @@ pub struct Pack {
 pub struct Tag {
     pub id: i64,
     pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Section {
+    pub id: i64,
+    pub name: String,
+    pub position: f64,
+    pub created_at: String,
+    pub deleted_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -9,7 +9,7 @@ use crate::placeholders::{extract_variables, substitute_variables};
 use crate::Store;
 
 pub(crate) const TEMPLATE_COLUMNS: &str =
-    "id, title, body, created_at, description, variables_json, pack_id";
+    "id, title, body, created_at, description, variables_json, pack_id, section_id, deleted_at";
 
 pub(crate) fn template_from_row(row: &rusqlite::Row) -> rusqlite::Result<Template> {
     Ok(Template {
@@ -20,6 +20,8 @@ pub(crate) fn template_from_row(row: &rusqlite::Row) -> rusqlite::Result<Templat
         description: row.get("description")?,
         variables_json: row.get("variables_json")?,
         pack_id: row.get("pack_id")?,
+        section_id: row.get("section_id")?,
+        deleted_at: row.get("deleted_at")?,
     })
 }
 
@@ -245,5 +247,13 @@ mod tests {
         let now_b = store.list_now(Some(b.id)).unwrap();
         assert_eq!(now_a.len(), 1);
         assert_eq!(now_b.len(), 1);
+    }
+
+    #[test]
+    fn new_templates_default_to_no_section_and_not_deleted() {
+        let store = Store::open_in_memory().unwrap();
+        let t = store.create_template("title", "body").unwrap();
+        assert_eq!(t.section_id, None);
+        assert_eq!(t.deleted_at, None);
     }
 }

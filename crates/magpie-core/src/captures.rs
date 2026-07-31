@@ -35,13 +35,15 @@ pub(crate) fn capture_from_row(row: &Row) -> rusqlite::Result<Capture> {
         handback_at: row.get("handback_at")?,
         source_id: row.get("source_id")?,
         merged_into: row.get("merged_into")?,
+        section_id: row.get("section_id")?,
+        deleted_at: row.get("deleted_at")?,
     })
 }
 
 pub(crate) const CAPTURE_COLUMNS: &str =
     "id, kind, body, created_at, done_at, failed_reason, queue_pos, \
      project_id, branch, lease_session, lease_client, lease_pid, lease_at, lease_head_commit, \
-     handback_note, diff_stat, handback_at, source_id, merged_into";
+     handback_note, diff_stat, handback_at, source_id, merged_into, section_id, deleted_at";
 
 impl Store {
     /// Capture something into the stream (Inbox: no project until assigned).
@@ -433,5 +435,13 @@ mod tests {
 
         let ranked = store.list_projects_by_recency(10).unwrap();
         assert_eq!(ranked[0].id, b.id);
+    }
+
+    #[test]
+    fn new_captures_default_to_no_section_and_not_deleted() {
+        let store = Store::open_in_memory().unwrap();
+        let c = store.capture("hello", None).unwrap();
+        assert_eq!(c.section_id, None);
+        assert_eq!(c.deleted_at, None);
     }
 }
