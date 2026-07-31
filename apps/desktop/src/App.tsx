@@ -25,7 +25,7 @@ import { TemplatesPanel } from "./components/TemplatesPanel";
 import { UndoToast } from "./components/UndoToast";
 import { api } from "./lib/api";
 import { NOW_CHANGED_EVENT, SECTIONS_CHANGED_EVENT } from "./lib/events";
-import type { Capabilities, Capture, Section } from "./lib/types";
+import type { Capabilities, Capture, Project, Section } from "./lib/types";
 import { cn } from "./lib/utils";
 
 // Groups items that carry a `section_id` into per-section buckets (in the
@@ -43,6 +43,24 @@ function groupBySection<T extends { section_id: number | null }>(items: T[]) {
   return { bySection, unsectioned };
 }
 
+// Every App-owned mutation handler a CaptureItem in the main stream can
+// call (see rowActions in App() below) -- bundled into one object so it can
+// be threaded through SortableSectionGroup as a single prop instead of
+// nine-plus individually-named ones.
+interface CaptureRowActions {
+  onPromote: (id: number) => void;
+  onDone: (id: number) => void;
+  onReopen: (id: number) => void;
+  onEdit: (id: number, body: string) => Promise<void>;
+  onMerge: (ids: number[]) => void;
+  onDelete: (ids: number[]) => void;
+  onMoveProject: (ids: number[], projectId: number | null) => void;
+  onMoveSection: (ids: number[], sectionId: number | null) => void;
+  onCreateSection: (ids: number[], name: string) => void;
+  projects: Project[];
+  sections: Section[];
+}
+
 // The section-group analog of NowList's `SortableCaptureItem`: the entire
 // header+members block is the draggable unit (so reordering a section
 // carries its rendered captures along with it), but only the header's grip
@@ -52,17 +70,17 @@ function SortableSectionGroup({
   captures,
   selected,
   onToggleSelect,
-  onPromote,
   onRenameSection,
   onDeleteSection,
+  rowActions,
 }: {
   section: Section;
   captures: Capture[];
   selected: Set<number>;
   onToggleSelect: (id: number) => void;
-  onPromote: (id: number) => void;
   onRenameSection: (id: number, name: string) => void;
   onDeleteSection: (id: number) => void;
+  rowActions: CaptureRowActions;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: section.id,
@@ -86,8 +104,19 @@ function SortableSectionGroup({
             key={capture.id}
             capture={capture}
             selected={selected.has(capture.id)}
+            selectedIds={selected}
             onToggleSelect={onToggleSelect}
-            onPromote={capture.queue_pos === null ? onPromote : undefined}
+            onPromote={capture.queue_pos === null ? rowActions.onPromote : undefined}
+            onDone={rowActions.onDone}
+            onReopen={rowActions.onReopen}
+            onEdit={rowActions.onEdit}
+            onMerge={rowActions.onMerge}
+            onDelete={rowActions.onDelete}
+            onMoveProject={rowActions.onMoveProject}
+            onMoveSection={rowActions.onMoveSection}
+            onCreateSection={rowActions.onCreateSection}
+            projects={rowActions.projects}
+            sections={rowActions.sections}
           />
         ))}
       </div>
@@ -112,6 +141,7 @@ function App() {
   const [stream, setStream] = useState<Capture[]>([]);
   const [now, setNow] = useState<Capture[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Capture[] | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -163,6 +193,10 @@ function App() {
     api.listSections().then(setSections).catch(console.error);
   }, []);
 
+  const refreshProjects = useCallback(() => {
+    api.listProjects().then(setProjects).catch(console.error);
+  }, []);
+
   const sectionSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -172,6 +206,7 @@ function App() {
     refreshStream();
     refreshNow();
     refreshSections();
+    refreshProjects();
     api.captureCapabilities().then(setCapabilities).catch(console.error);
 
     const unlistenCapture = listen("capture:added", () => {
@@ -212,7 +247,7 @@ function App() {
       unlistenNow.then((f) => f());
       unlistenSections.then((f) => f());
     };
-  }, [refreshStream, refreshNow, refreshSections]);
+  }, [refreshStream, refreshNow, refreshSections, refreshProjects]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -252,6 +287,76 @@ function App() {
     await api.mergeCaptures(Array.from(selected));
     setSelected(new Set());
     refreshStream();
+  }
+
+  // Context-menu counterpart of handleMerge above: MergeToolbar always acts
+  // on `selected` (the batch bar itself is the selection UI), but a row's
+  // "Merge Notes" item works off whatever CaptureItem's own batch-aware rule
+  // resolved (the checked selection if non-empty, else just that row) --
+  // ids.length < 2 is already guarded against by the menu item's own
+  // `disabled` (merge_captures rejects fewer than 2 sources), so this only
+  // has to guard the same invariant defensively.
+  async function handleMergeIds(ids: number[]) {
+    if (ids.length < 2) return;
+    await api.mergeCaptures(ids);
+    setSelected(new Set());
+    refreshStream();
+    refreshNow();
+    emit(NOW_CHANGED_EVENT);
+  }
+
+  async function handleUpdateBody(id: number, body: string) {
+    await api.updateCaptureBody(id, body);
+    refreshStream();
+    refreshNow();
+    emit(NOW_CHANGED_EVENT);
+  }
+
+  async function handleMoveProject(ids: number[], projectId: number | null) {
+    await Promise.all(ids.map((id) => api.assignCaptureProject(id, projectId)));
+    refreshStream();
+    refreshNow();
+    emit(NOW_CHANGED_EVENT);
+  }
+
+  async function handleMoveSection(ids: number[], sectionId: number | null) {
+    await Promise.all(ids.map((id) => api.assignCaptureSection(id, sectionId)));
+    refreshStream();
+    refreshNow();
+    emit(SECTIONS_CHANGED_EVENT);
+    emit(NOW_CHANGED_EVENT);
+  }
+
+  async function handleCreateAndAssignSection(ids: number[], name: string) {
+    const section = await api.createSection(name);
+    await Promise.all(ids.map((id) => api.assignCaptureSection(id, section.id)));
+    refreshSections();
+    refreshStream();
+    refreshNow();
+    emit(SECTIONS_CHANGED_EVENT);
+    emit(NOW_CHANGED_EVENT);
+  }
+
+  // Batch-aware delete: ids is either the checked selection or the single
+  // clicked row (CaptureItem's targetIds()). Each delete is soft (Task 4/8),
+  // so Undo just restores every id this call touched -- one toast covers the
+  // whole batch rather than one per row.
+  async function handleDeleteCaptures(ids: number[]) {
+    await Promise.all(ids.map((id) => api.deleteCapture(id)));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.delete(id);
+      return next;
+    });
+    refreshStream();
+    refreshNow();
+    emit(NOW_CHANGED_EVENT);
+    showUndoToast(ids.length > 1 ? `${ids.length} captures deleted.` : "Capture deleted.", async () => {
+      await Promise.all(ids.map((id) => api.restoreCapture(id)));
+      refreshStream();
+      refreshNow();
+      emit(NOW_CHANGED_EVENT);
+    });
   }
 
   async function handleNowReorder(id: number, afterId: number | null) {
@@ -319,6 +424,20 @@ function App() {
 
   async function handleDone(id: number) {
     await api.markCaptureDone(id);
+    // Now-list callers already got away with skipping this (a Now row
+    // disappears from `now` either way), but Mark Done/Reopen is now also
+    // reachable from the main stream's context menu, where the row's
+    // Reopen/Mark Done toggle is read straight off `stream`'s own copy of
+    // done_at -- that needs a refetch too, or the toggle would stay stuck on
+    // whichever label it showed before the click.
+    refreshStream();
+    refreshNow();
+    emit(NOW_CHANGED_EVENT);
+  }
+
+  async function handleReopen(id: number) {
+    await api.reopenCapture(id);
+    refreshStream();
     refreshNow();
     emit(NOW_CHANGED_EVENT);
   }
@@ -329,6 +448,25 @@ function App() {
     refreshStream();
     emit(NOW_CHANGED_EVENT);
   }
+
+  // The full set of App-owned mutation handlers every CaptureItem in the
+  // main stream needs (Now-list rows don't get these -- see CaptureItem's
+  // props, all optional, for what that degrades to). One object so each of
+  // the three render sites below (search results, sectioned, unsectioned)
+  // stays in sync rather than drifting prop-by-prop.
+  const rowActions: CaptureRowActions = {
+    onPromote: handlePromote,
+    onDone: handleDone,
+    onReopen: handleReopen,
+    onEdit: handleUpdateBody,
+    onMerge: handleMergeIds,
+    onDelete: handleDeleteCaptures,
+    onMoveProject: handleMoveProject,
+    onMoveSection: handleMoveSection,
+    onCreateSection: handleCreateAndAssignSection,
+    projects,
+    sections,
+  };
 
   const visibleStream = searchResults ?? stream;
 
@@ -415,8 +553,19 @@ function App() {
                         key={capture.id}
                         capture={capture}
                         selected={selected.has(capture.id)}
+                        selectedIds={selected}
                         onToggleSelect={toggleSelect}
-                        onPromote={capture.queue_pos === null ? handlePromote : undefined}
+                        onPromote={capture.queue_pos === null ? rowActions.onPromote : undefined}
+                        onDone={rowActions.onDone}
+                        onReopen={rowActions.onReopen}
+                        onEdit={rowActions.onEdit}
+                        onMerge={rowActions.onMerge}
+                        onDelete={rowActions.onDelete}
+                        onMoveProject={rowActions.onMoveProject}
+                        onMoveSection={rowActions.onMoveSection}
+                        onCreateSection={rowActions.onCreateSection}
+                        projects={rowActions.projects}
+                        sections={rowActions.sections}
                       />
                     ))}
                   </div>
@@ -448,9 +597,9 @@ function App() {
                                   captures={bySection.get(s.id)!}
                                   selected={selected}
                                   onToggleSelect={toggleSelect}
-                                  onPromote={handlePromote}
                                   onRenameSection={handleRenameSection}
                                   onDeleteSection={handleDeleteSection}
+                                  rowActions={rowActions}
                                 />
                               ))}
                             </SortableContext>
@@ -465,8 +614,19 @@ function App() {
                             key={capture.id}
                             capture={capture}
                             selected={selected.has(capture.id)}
+                            selectedIds={selected}
                             onToggleSelect={toggleSelect}
-                            onPromote={capture.queue_pos === null ? handlePromote : undefined}
+                            onPromote={capture.queue_pos === null ? rowActions.onPromote : undefined}
+                            onDone={rowActions.onDone}
+                            onReopen={rowActions.onReopen}
+                            onEdit={rowActions.onEdit}
+                            onMerge={rowActions.onMerge}
+                            onDelete={rowActions.onDelete}
+                            onMoveProject={rowActions.onMoveProject}
+                            onMoveSection={rowActions.onMoveSection}
+                            onCreateSection={rowActions.onCreateSection}
+                            projects={rowActions.projects}
+                            sections={rowActions.sections}
                           />
                         ))}
                       </div>
