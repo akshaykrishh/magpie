@@ -194,8 +194,18 @@ function App() {
     // with changes made over there, and vice versa (see handlers below).
     const unlistenNow = listen(NOW_CHANGED_EVENT, refreshNow);
     // Same cross-window sync, for sections renamed/reordered/deleted from
-    // the dock's own section headers.
-    const unlistenSections = listen(SECTIONS_CHANGED_EVENT, refreshSections);
+    // the dock's own section headers. Must also refresh `stream` here, not
+    // just `sections` -- a section delete clears `section_id` on its
+    // members server-side, but this window's cached `stream` array still
+    // carries the old (now-orphaned) `section_id` until refetched. Without
+    // this, `groupBySection` would keep bucketing those captures under a
+    // section id that `sections` no longer contains, and they'd render in
+    // neither a section group nor the unsectioned list -- silently vanishing
+    // from the stream view rather than reappearing as unsectioned.
+    const unlistenSections = listen(SECTIONS_CHANGED_EVENT, () => {
+      refreshSections();
+      refreshStream();
+    });
     return () => {
       unlistenCapture.then((f) => f());
       unlistenCaptureUpdated.then((f) => f());
