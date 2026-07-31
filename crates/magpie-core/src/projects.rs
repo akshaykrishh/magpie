@@ -12,10 +12,28 @@ fn project_from_row(row: &Row) -> rusqlite::Result<Project> {
         remote_url: row.get("remote_url")?,
         common_git_dir: row.get("common_git_dir")?,
         created_at: row.get("created_at")?,
+        last_active_at: row.get("last_active_at")?,
     })
 }
 
-const PROJECT_COLUMNS: &str = "id, name, remote_url, common_git_dir, created_at";
+const PROJECT_COLUMNS: &str =
+    "id, name, remote_url, common_git_dir, created_at, last_active_at";
+
+/// Bump a project's recency signal -- called whenever a capture is filed
+/// into it, so `list_projects_by_recency` reflects "projects I've actually
+/// touched lately", not alphabetical order. Not a public `Store` method:
+/// it's an internal side effect of filing, never an action a caller takes
+/// on its own.
+pub(crate) fn touch_project_active_tx(
+    conn: &rusqlite::Connection,
+    project_id: i64,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE projects SET last_active_at = ?1 WHERE id = ?2",
+        params![now_iso(), project_id],
+    )?;
+    Ok(())
+}
 
 impl Store {
     /// Identity is the git remote URL, falling back to the common git dir --
@@ -36,7 +54,9 @@ impl Store {
                     .query_row(&sql, params![remote_url], project_from_row)
                     .optional()?
                 {
-                    return Ok(p);
+                    touch_project_active_tx(conn, p.id)?;
+                    let sql = format!("SELECT {PROJECT_COLUMNS} FROM projects WHERE id = ?1");
+                    return Ok(conn.query_row(&sql, params![p.id], project_from_row)?);
                 }
             } else if let Some(common_git_dir) = common_git_dir {
                 let sql =
@@ -45,7 +65,9 @@ impl Store {
                     .query_row(&sql, params![common_git_dir], project_from_row)
                     .optional()?
                 {
-                    return Ok(p);
+                    touch_project_active_tx(conn, p.id)?;
+                    let sql = format!("SELECT {PROJECT_COLUMNS} FROM projects WHERE id = ?1");
+                    return Ok(conn.query_row(&sql, params![p.id], project_from_row)?);
                 }
             }
 
@@ -55,6 +77,7 @@ impl Store {
                 params![name, remote_url, common_git_dir, now_iso()],
             )?;
             let id = conn.last_insert_rowid();
+            touch_project_active_tx(conn, id)?;
             let sql = format!("SELECT {PROJECT_COLUMNS} FROM projects WHERE id = ?1");
             Ok(conn.query_row(&sql, params![id], project_from_row)?)
         })
@@ -75,6 +98,23 @@ impl Store {
                 format!("SELECT {PROJECT_COLUMNS} FROM projects ORDER BY name COLLATE NOCASE");
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map([], project_from_row)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
+    /// Projects ordered by most-recently-touched first (via
+    /// `touch_project_active_tx`), untouched projects last. This is the
+    /// ranking the desktop app's capture-filing guess uses -- see
+    /// docs/superpowers/plans/2026-07-31-confidence-aware-capture-filing.md.
+    pub fn list_projects_by_recency(&self, limit: i64) -> Result<Vec<Project>> {
+        self.with_conn(|conn| {
+            let sql = format!(
+                "SELECT {PROJECT_COLUMNS} FROM projects
+                 ORDER BY last_active_at IS NULL, last_active_at DESC, id DESC
+                 LIMIT ?1"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params![limit], project_from_row)?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
     }
@@ -138,5 +178,48 @@ mod tests {
             .get_or_create_project("b", Some("git@github.com:x/b.git"), None)
             .unwrap();
         assert_ne!(a.id, b.id);
+    }
+
+    #[test]
+    fn list_projects_by_recency_orders_touched_projects_first() {
+        let store = Store::open_in_memory().unwrap();
+        let a = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        let b = store
+            .get_or_create_project("b", Some("git@github.com:x/b.git"), None)
+            .unwrap();
+        // a has the lower id (created first), so an id-descending tie-break
+        // alone would rank b first. Re-touch a -- if that actually worked,
+        // a (despite its lower id) must now outrank b.
+        store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+
+        let ranked = store.list_projects_by_recency(10).unwrap();
+        assert_eq!(ranked[0].id, a.id);
+        assert_eq!(ranked[1].id, b.id);
+    }
+
+    #[test]
+    fn list_projects_by_recency_respects_limit() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        store
+            .get_or_create_project("b", Some("git@github.com:x/b.git"), None)
+            .unwrap();
+        let ranked = store.list_projects_by_recency(1).unwrap();
+        assert_eq!(ranked.len(), 1);
+    }
+
+    #[test]
+    fn newly_created_project_has_a_recency_timestamp() {
+        let store = Store::open_in_memory().unwrap();
+        let p = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        assert!(p.last_active_at.is_some());
     }
 }

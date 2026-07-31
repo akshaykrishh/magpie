@@ -219,6 +219,9 @@ impl Store {
                 "UPDATE captures SET project_id = ?1 WHERE id = ?2",
                 params![project_id, id],
             )?;
+            if let Some(project_id) = project_id {
+                crate::projects::touch_project_active_tx(conn, project_id)?;
+            }
             get_capture_tx(conn, id)
         })
     }
@@ -366,5 +369,28 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let err = store.get_capture(999).unwrap_err();
         assert!(matches!(err, Error::CaptureNotFound(999)));
+    }
+
+    #[test]
+    fn assigning_a_capture_touches_its_project_recency() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        let b = store
+            .get_or_create_project("b", Some("git@github.com:x/b.git"), None)
+            .unwrap();
+        // Re-touch a so it outranks b by recency despite its lower id --
+        // this establishes that assigning a capture to b (below) is what
+        // moves b back to the top, not creation order or an id tie-break.
+        store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+
+        let capture = store.capture("something", None).unwrap();
+        store.assign_project(capture.id, Some(b.id)).unwrap();
+
+        let ranked = store.list_projects_by_recency(10).unwrap();
+        assert_eq!(ranked[0].id, b.id);
     }
 }
