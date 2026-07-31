@@ -68,16 +68,46 @@ impl Store {
     }
 
     /// Marks a session ended (graceful stdio-close, or the dead-pid sweep
-    /// confirming its process is gone). Idempotent -- ending an
-    /// already-ended session just re-sets the same timestamp, since a
-    /// dead-pid sweep and a graceful close could plausibly race on the same
-    /// session and neither side should error over losing that race.
+    /// confirming its process is gone) and writes a digest capture
+    /// summarizing what happened -- see `format_digest_body`. Idempotent in
+    /// the sense that ending an already-ended session never errors (a dead-
+    /// pid sweep and a graceful close could plausibly race on the same
+    /// session), though calling this twice does write a second digest and
+    /// re-run the counts against a later `now` -- acceptable since the
+    /// realistic race is "ends once, from whichever path notices first."
     pub fn end_session(&self, id: &str) -> Result<()> {
         self.with_conn(|conn| {
-            conn.execute(
-                "UPDATE sessions SET ended_at = ?1 WHERE id = ?2",
-                params![now_iso(), id],
+            let session = get_session_tx(conn, id)?;
+            let now = now_iso();
+
+            let captures_during: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM captures
+                 WHERE created_at >= ?1 AND created_at <= ?2 AND kind = 'capture'",
+                params![session.started_at, now],
+                |r| r.get(0),
             )?;
+            let unpromoted: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM captures
+                 WHERE created_at >= ?1 AND created_at <= ?2 AND kind = 'capture'
+                   AND queue_pos IS NULL AND done_at IS NULL",
+                params![session.started_at, now],
+                |r| r.get(0),
+            )?;
+
+            conn.execute(
+                "UPDATE sessions
+                 SET ended_at = ?1, captures_during_session = ?2, unpromoted_at_end = ?3
+                 WHERE id = ?4",
+                params![now, captures_during, unpromoted, id],
+            )?;
+
+            let body = format_digest_body(&session, captures_during, unpromoted);
+            conn.execute(
+                "INSERT INTO captures (kind, body, created_at, project_id, branch)
+                 VALUES ('session_digest', ?1, ?2, ?3, ?4)",
+                params![body, now, session.project_id, session.branch],
+            )?;
+
             Ok(())
         })
     }
@@ -109,6 +139,20 @@ impl Store {
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
     }
+}
+
+/// The digest's body text -- deliberately doesn't claim to know who made
+/// each capture during the session (a human's typed prompt and an agent's
+/// `capture_add` are indistinguishable at this layer, both landing via
+/// `Store::capture(&body, None)`), so this says what's actually known
+/// rather than guessing "you" vs. "the agent".
+fn format_digest_body(session: &Session, captures_during: i64, unpromoted: i64) -> String {
+    let client = session.client.as_deref().unwrap_or("unknown client");
+    format!(
+        "Session ended -- {client}. {} completed, {} failed, {} handed back. \
+         {captures_during} captured while it ran, {unpromoted} still unpromoted.",
+        session.completed_count, session.failed_count, session.handback_count,
+    )
 }
 
 /// Backfills `client` (unknown until MCP's `clientInfo` handshake resolves,
@@ -269,5 +313,100 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let err = store.get_session("nope").unwrap_err();
         assert!(matches!(err, crate::error::Error::SessionNotFound(id) if id == "nope"));
+    }
+
+    #[test]
+    fn end_session_writes_a_digest_capture() {
+        let store = Store::open_in_memory().unwrap();
+        let proj = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        store
+            .create_session("sess-1", 111, Some(proj.id), Some("main"))
+            .unwrap();
+
+        store.end_session("sess-1").unwrap();
+
+        let stream = store.list_stream(None, 10, 0).unwrap();
+        let digests: Vec<_> = stream.iter().filter(|c| c.is_session_digest()).collect();
+        assert_eq!(digests.len(), 1);
+        assert_eq!(digests[0].project_id, Some(proj.id));
+        assert!(!digests[0].in_now(), "a digest is never promoted into Now");
+    }
+
+    #[test]
+    fn end_session_records_captures_during_session_and_unpromoted_at_end() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+
+        let a = store.capture("first thing", None).unwrap();
+        let _b = store.capture("second thing", None).unwrap();
+        store.promote(a.id).unwrap(); // promoted: no longer "unpromoted"
+
+        store.end_session("sess-1").unwrap();
+
+        let session = store.get_session("sess-1").unwrap();
+        assert_eq!(session.captures_during_session, Some(2));
+        assert_eq!(session.unpromoted_at_end, Some(1));
+    }
+
+    #[test]
+    fn end_session_digest_does_not_count_itself_or_other_digests() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        store.end_session("sess-1").unwrap(); // writes one digest, counts 0
+
+        store.create_session("sess-2", 222, None, None).unwrap();
+        store.end_session("sess-2").unwrap();
+
+        let session_two = store.get_session("sess-2").unwrap();
+        // sess-1's digest already exists in the stream by the time sess-2
+        // ends; it must not be counted as something "captured" during
+        // sess-2's lifetime.
+        assert_eq!(session_two.captures_during_session, Some(0));
+        assert_eq!(session_two.unpromoted_at_end, Some(0));
+    }
+
+    #[test]
+    fn digest_capture_is_findable_via_search() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        store.touch_session_active("sess-1", "claude-code").unwrap();
+        store.end_session("sess-1").unwrap();
+
+        let results = store.search("claude-code", 10).unwrap();
+        assert!(
+            results.iter().any(|c| c.is_session_digest()),
+            "the digest body should mention the client name and be findable by it"
+        );
+    }
+
+    #[test]
+    fn digest_is_invisible_to_queue_take_and_queue_peek() {
+        let store = Store::open_in_memory().unwrap();
+        let proj = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        store
+            .create_session("sess-1", 111, Some(proj.id), None)
+            .unwrap();
+        store.end_session("sess-1").unwrap();
+
+        assert!(store
+            .queue_peek(Some(proj.id), None, 10)
+            .unwrap()
+            .is_empty());
+        let identity = crate::lease::LeaseIdentity {
+            session: "sess-2".to_string(),
+            client: "someone-else".to_string(),
+            pid: 222,
+        };
+        store
+            .create_session("sess-2", 222, Some(proj.id), None)
+            .unwrap();
+        assert!(store
+            .queue_take(Some(proj.id), None, &identity)
+            .unwrap()
+            .is_none());
     }
 }
