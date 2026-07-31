@@ -1,6 +1,7 @@
 mod capture_flow;
 mod commands;
 mod dead_pid_sweep;
+mod purge_sweep;
 mod state;
 mod toast;
 mod tray;
@@ -113,9 +114,21 @@ pub fn run() {
             let store = magpie_core::Store::open(&db_path)
                 .unwrap_or_else(|e| panic!("failed to open database at {db_path:?}: {e}"));
             dead_pid_sweep::sweep(&store);
+            purge_sweep::sweep(&store);
 
             let backend = state::make_backend();
             app.manage(state::AppState::new(store, backend));
+
+            // Recurring purge: only touches the SQLite Store, never a
+            // window/panel, so a plain background thread is safe here
+            // (the AppKit main-thread rule from toast.rs's history only
+            // applies to code that touches a Tauri window/panel).
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(60 * 60 * 24));
+                let state = app_handle.state::<state::AppState>();
+                purge_sweep::sweep(&state.store);
+            });
 
             // Menu-bar-resident utility: no Dock icon, no Cmd+Tab entry.
             #[cfg(target_os = "macos")]
