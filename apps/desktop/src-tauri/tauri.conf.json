@@ -47,6 +47,18 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "resizable": true
+      },
+      {
+        "label": "settings",
+        "title": "magpie — Settings",
+        "url": "settings.html",
+        "width": 420,
+        "height": 320,
+        "minWidth": 360,
+        "minHeight": 280,
+        "visible": false,
+        "decorations": true,
+        "resizable": true
       }
     ],
     "security": {

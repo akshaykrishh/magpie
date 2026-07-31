@@ -4,6 +4,7 @@ import type {
   Blob,
   Capabilities,
   Capture,
+  HotkeySettings,
   Project,
   ProjectFilter,
   ProjectOverview,
@@ -141,4 +142,6 @@ export const api = {
 
   copyCapturesAsChecklist: (ids: number[]) =>
     invoke<void>("copy_captures_as_checklist", { ids }),
+
+  getHotkeySettings: () => invoke<HotkeySettings>("get_hotkey_settings"),
 };

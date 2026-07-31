@@ -7,6 +7,7 @@ use tauri::{
 
 const MAIN_LABEL: &str = "main";
 const DOCK_LABEL: &str = "dock";
+const SETTINGS_LABEL: &str = "settings";
 
 /// A monochrome "template" image, not the full-color app icon -- macOS
 /// tints template images automatically to match the current menu bar
@@ -22,8 +23,9 @@ const TRAY_ICON_TEMPLATE: &[u8] = include_bytes!("../icons/tray-icon-template.pn
 pub fn init_tray(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Show magpie", true, None::<&str>)?;
     let toggle_dock = MenuItem::with_id(app, "toggle_dock", "Toggle Now dock", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let quit = PredefinedMenuItem::quit(app, Some("Quit magpie"))?;
-    let menu = Menu::with_items(app, &[&show, &toggle_dock, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &toggle_dock, &settings, &quit])?;
 
     let icon = Image::from_bytes(TRAY_ICON_TEMPLATE)?;
 
@@ -35,6 +37,7 @@ pub fn init_tray(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main_window(app),
             "toggle_dock" => toggle_dock_window(app),
+            "settings" => show_settings_window(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -54,6 +57,14 @@ pub fn init_tray(app: &AppHandle) -> tauri::Result<()> {
 
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_LABEL) {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn show_settings_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(SETTINGS_LABEL) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();

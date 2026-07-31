@@ -124,3 +124,9 @@ export type ProjectFilter =
   | { kind: "all" }
   | { kind: "inbox" }
   | { kind: "project"; id: number };
+
+// Mirrors the JSON object returned by `get_hotkey_settings`.
+export interface HotkeySettings {
+  capture: string;
+  screenshot: string;
+}

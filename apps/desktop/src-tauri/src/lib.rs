@@ -2,6 +2,7 @@ mod capture_flow;
 mod commands;
 mod dead_pid_sweep;
 mod purge_sweep;
+mod settings_commands;
 mod state;
 mod toast;
 mod tray;
@@ -9,13 +10,15 @@ mod tray;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
 
-const HOTKEY: &str = "CommandOrControl+Shift+M";
+// `pub(crate)` (rather than private) so `settings_commands::get_hotkey_settings`
+// can fall back to these defaults when no `settings` row has been written yet.
+pub(crate) const HOTKEY: &str = "CommandOrControl+Shift+M";
 /// A modifier variant of the capture hotkey rather than something
 /// unrelated (e.g. Cmd+Shift+S, which would shadow every other app's Save
 /// As while magpie is running) -- the fourth modifier makes collision with
 /// any existing app shortcut essentially impossible while staying
 /// mnemonically paired with the capture hotkey it extends.
-const SCREENSHOT_HOTKEY: &str = "CommandOrControl+Shift+Alt+M";
+pub(crate) const SCREENSHOT_HOTKEY: &str = "CommandOrControl+Shift+Alt+M";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -107,9 +110,10 @@ pub fn run() {
             commands::instantiate_template_with_values,
             commands::list_sessions,
             commands::list_projects_overview,
+            settings_commands::get_hotkey_settings,
         ])
         .on_window_event(|window, event| {
-            if matches!(window.label(), "main" | "dock") {
+            if matches!(window.label(), "main" | "dock" | "settings") {
                 tray::hide_instead_of_close(window, event);
             }
         })
