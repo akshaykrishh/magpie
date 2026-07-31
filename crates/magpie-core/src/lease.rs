@@ -108,8 +108,8 @@ impl Store {
     /// Completes a leased item. Must be called by the session holding the
     /// lease -- an agent can't complete work it never took.
     pub fn capture_complete(&self, id: i64, session: &str) -> Result<Capture> {
-        self.with_conn(|conn| {
-            let tx = conn.unchecked_transaction()?;
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
             let client = require_lease_tx(&tx, id, session)?;
             tx.execute(
                 "UPDATE captures
@@ -132,8 +132,8 @@ impl Store {
     /// mystery you have to investigate. The item stays in Now and is
     /// immediately eligible for `queue_take` again.
     pub fn capture_fail(&self, id: i64, session: &str, reason: &str) -> Result<Capture> {
-        self.with_conn(|conn| {
-            let tx = conn.unchecked_transaction()?;
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
             let client = require_lease_tx(&tx, id, session)?;
             tx.execute(
                 "UPDATE captures
