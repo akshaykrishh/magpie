@@ -40,6 +40,21 @@ function App() {
     onUndo: () => void;
   } | null>(null);
 
+  // Stable identities: `undoToast` itself changes every time a new toast is
+  // shown, but these two callbacks must NOT change on every unrelated App
+  // re-render (e.g. a background capture arriving while the toast is up) --
+  // UndoToast's auto-dismiss timer depends on `onDismiss`'s identity, and a
+  // fresh function reference on every render would re-arm the timer forever.
+  // The functional `setUndoToast` form reads the current toast at call time,
+  // so these can have an empty dependency array.
+  const dismissUndoToast = useCallback(() => setUndoToast(null), []);
+  const undoAndDismissToast = useCallback(() => {
+    setUndoToast((prev) => {
+      prev?.onUndo();
+      return null;
+    });
+  }, []);
+
   const refreshStream = useCallback(() => {
     api.listStream({ kind: "all" }).then(setStream).catch(console.error);
   }, []);
@@ -255,11 +270,8 @@ function App() {
       {undoToast && (
         <UndoToast
           message={undoToast.message}
-          onUndo={() => {
-            undoToast.onUndo();
-            setUndoToast(null);
-          }}
-          onDismiss={() => setUndoToast(null)}
+          onUndo={undoAndDismissToast}
+          onDismiss={dismissUndoToast}
         />
       )}
     </main>
