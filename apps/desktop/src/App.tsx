@@ -289,6 +289,17 @@ function App() {
     refreshStream();
   }
 
+  // Toolbar-only action: the row context menu's "Copy as List" calls
+  // api.copyCapturesAsChecklist(ids) directly with no App-owned handler in
+  // between (see CaptureItem's buildContextMenuItems) -- this thin wrapper
+  // makes the exact same call the exact same way (same ids ordering, via
+  // Array.from(selected), matching targetIds()'s Array.from(selectedIds))
+  // so the two entry points produce byte-identical clipboard output for the
+  // same selection.
+  async function handleCopyAsList() {
+    await api.copyCapturesAsChecklist(Array.from(selected));
+  }
+
   // Context-menu counterpart of handleMerge above: MergeToolbar always acts
   // on `selected` (the batch bar itself is the selection UI), but a row's
   // "Merge Notes" item works off whatever CaptureItem's own batch-aware rule
@@ -537,7 +548,21 @@ function App() {
               <MergeToolbar
                 count={selected.size}
                 onMerge={handleMerge}
+                onCopyAsList={handleCopyAsList}
+                // Same handlers rowActions already threads into every
+                // CaptureItem's context menu (handleMoveProject/handleMoveSection/
+                // handleDeleteCaptures all take an ids array) -- the toolbar just
+                // supplies Array.from(selected) as that array, identical to what
+                // CaptureItem's own targetIds() resolves to for a non-empty
+                // selection, so the same click produces the same mutation, the
+                // same refetches, and (for delete) the same Undo toast whichever
+                // entry point triggered it.
+                onMoveToProject={(projectId) => handleMoveProject(Array.from(selected), projectId)}
+                onMoveToSection={(sectionId) => handleMoveSection(Array.from(selected), sectionId)}
+                onDelete={() => handleDeleteCaptures(Array.from(selected))}
                 onClear={() => setSelected(new Set())}
+                projects={projects}
+                sections={sections}
               />
               <div className="flex-1 overflow-y-auto">
                 {visibleStream.length === 0 ? (
