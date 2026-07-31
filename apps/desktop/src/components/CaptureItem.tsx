@@ -174,6 +174,21 @@ export function CaptureItem({
   // *disabled* for this particular capture's kind/shape.
   const editActionDisabled = isSessionDigest || isScreenshot;
 
+  // Latest-value ref for the editSignal effect below -- deliberately NOT a
+  // dependency of that effect. `onEdit` traces back to App.tsx's
+  // `rowActions.onEdit` (a fresh object + a plain non-memoized function on
+  // every App render) and `editActionDisabled` is a plain const recomputed
+  // every render, so putting either in the effect's deps would re-run it
+  // (and re-fire `setEditing(true)`) on *any* unrelated App re-render --
+  // e.g. toggling a different row's checkbox after the user pressed `e` and
+  // then explicitly canceled the edit -- silently reopening a canceled
+  // editor. Reading the latest values through this ref instead lets the
+  // effect depend on `[editSignal]` alone (the same shape as expandSignal's
+  // effect below), so it only ever re-runs when `editSignal` itself changes
+  // to a genuinely new token.
+  const editGateRef = useRef({ onEdit, editActionDisabled });
+  editGateRef.current = { onEdit, editActionDisabled };
+
   // See expandSignal/editSignal's doc comments above -- each effect only
   // fires when its own signal changes to a defined value, mirroring exactly
   // what the corresponding context-menu item's onClick already does.
@@ -184,9 +199,11 @@ export function CaptureItem({
   useEffect(() => {
     // Same two gates the "Edit" menu item itself applies: no handler wired
     // at all (e.g. this row has no onEdit, so the menu wouldn't even show
-    // the item), or this capture's kind/shape disables it.
-    if (editSignal !== undefined && !editActionDisabled && onEdit) setEditing(true);
-  }, [editSignal, editActionDisabled, onEdit]);
+    // the item), or this capture's kind/shape disables it. Read from the
+    // ref, not the props/const directly -- see editGateRef's comment above.
+    const { onEdit: currentOnEdit, editActionDisabled: currentlyDisabled } = editGateRef.current;
+    if (editSignal !== undefined && !currentlyDisabled && currentOnEdit) setEditing(true);
+  }, [editSignal]);
 
   return (
     <div
