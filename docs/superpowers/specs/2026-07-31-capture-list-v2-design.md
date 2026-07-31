@@ -84,6 +84,34 @@ that model and none of them are exposed to MCP).
 and `search` all add `WHERE deleted_at IS NULL`. A new `list_recently_deleted`
 (captures and templates) does the inverse, ordered by `deleted_at DESC`.
 
+## Sections — rendering & management
+
+**No explicit "Unsectioned" header.** Items without a `section_id` render in
+their existing order (`created_at DESC` in the stream, `queue_pos` in Now) —
+visually identical to today if you've never created a section. Section
+groups render above that plain list, each in the section's own fractional
+`position` order — the deliberately-organized stuff floats to a defined
+position, same shape as the dock's existing "one project focused, the rest
+peripheral" pattern in `docs/design.md`.
+
+**Search ignores section grouping entirely.** `search_captures` returns its
+existing FTS5-ranked flat list, exactly as today. Grouping by section during
+search would bury the actual relevance ranking search exists to surface,
+behind organizational structure that's irrelevant to "did I find the right
+one."
+
+**Management is in-place only — no dedicated "Manage Sections" panel.**
+Rename, drag-to-reorder, and delete all live directly on the section header
+wherever it's rendered (stream, Now, Templates), matching how `NowList`'s
+drag-reorder and `MergeToolbar`'s inline bar already work in this app. A
+separate management screen would just be a second, partially-redundant way to
+make the same edits.
+
+**Session digests can join a section and be copied normally.** Only Edit is
+restricted for `session_digest` rows (see "Edit" above) — their body is
+ordinary text, so Copy, Copy as List, and section assignment all behave the
+same as any other capture.
+
 ## Deletion
 
 Soft-delete via `deleted_at`, for both captures and templates (templates'
@@ -175,14 +203,24 @@ soft-deleted, undoable).
 ## Context menu
 
 Replaces the hover-icon row (Done/Promote/Demote) entirely. Triggered by
-right-click, or a small `•••` button on the row (trackpad/accessibility
-parity), or a keyboard shortcut that opens the identical menu on the currently
+right-click, or a hover-reveal `•••` button on the row (matching how the
+icons it replaces already behaved — a persistent per-row control on every row
+at rest is visual noise a minimalist list shouldn't pay for; right-click
+itself isn't hover-gated, since the whole row is already the click target,
+and keyboard users get the dedicated shortcut below, also not hover-gated),
+or a keyboard shortcut that opens the identical menu on the currently
 highlighted row (see Keyboard-first navigation) — one action set, three entry
 points, not three separately-maintained ones.
 
-**Batch-aware:** right-clicking an item that's part of the current checked
-multi-selection (2+) acts on the whole selection. Right-clicking an unselected
-item acts on just that one.
+**Batch actions are primarily reached through `MergeToolbar`, extended.**
+The existing `MergeToolbar` (appears only when 2+ items are checked) absorbs
+the *whole* batch action set — Copy as List, Move to Project, Move to
+Section, Delete — not just Merge. It's already conditional/appears-only-
+when-useful, so this costs nothing in visual weight at rest, and it's more
+discoverable than requiring a right-click on a selected row to reach batch
+behavior, which nothing in the UI otherwise hints at. Right-click on a
+selected row still reaches the same batch actions too — the toolbar is the
+obvious path, right-click is the secondary one, not a replacement for it.
 
 Full action set: Mark Done / Reopen (toggles with state), Promote to Now /
 Remove from Now (toggles with state), Copy, Copy as List, Edit, Edit in New
@@ -193,18 +231,46 @@ project and section are different axes — and Delete.
 
 ## Copy / Copy as List
 
-**Copy** copies the plain body text (single item) or newline-joined bodies
-(multi-selection).
+Nothing in the desktop app writes to the system clipboard today (only reads,
+for capture) — this is new infrastructure, via the official
+`tauri-plugin-clipboard-manager` plugin (new dependency).
 
-**Copy as List** copies as a **Markdown checklist** — `- [ ] <body>` per line
-— rather than a plain bullet list. This is the deliberate differentiator asked
-for: it's directly actionable when pasted into a GitHub issue, PR description,
-or an agent prompt (checkable, trackable), and it dogfoods the Markdown
-feature already in this batch instead of being an unrelated cosmetic change.
+**Single-item Copy on a screenshot copies the actual image bytes**
+(`writeImage`), not derived text — matching how every native macOS app
+(Finder, Preview, Chrome's "Copy Image") already treats "Copy" on an image.
+A text capture's Copy stays plain body text, as before.
+
+**Copy as List is inherently textual**, so it can't carry a real embedded
+image the same way — no plain-text/Markdown format can (Markdown's image
+syntax needs a hosted URL, which a local screenshot doesn't have; this isn't
+a magpie-specific limitation). It copies as a **Markdown checklist** —
+`- [ ] <body>` per line — rather than a plain bullet list, the deliberate
+differentiator asked for: directly actionable when pasted into a GitHub
+issue, PR description, or an agent prompt, and it dogfoods the Markdown
+feature already in this batch. A screenshot's line uses `blob.ocr_text` when
+`body` is empty, or an honest `[screenshot — OCR pending]` placeholder in the
+rare case OCR hasn't finished yet (a small window — `capture_flow.rs` already
+runs OCR within "a real fraction of a second" of capture) — never a silent
+blank line. (Considered and rejected: disabling Copy as List entirely
+whenever a screenshot is selected — throws away the common case of OCR text
+already being ready, for a narrow timing window that barely ever occurs in
+practice.)
 
 ## Keyboard-first navigation
 
-Gmail/Superhuman model, not a "cursor position is the selection" model:
+Gmail/Superhuman model, not a "cursor position is the selection" model.
+
+**Focus mechanism: real DOM focus, not a hand-rolled "active pane" variable.**
+The two-pane layout (Now sidebar always visible, stream/Templates in the main
+area) means multiple lists can be on screen at once — arrow keys need to know
+which one they apply to. Each list container gets `tabIndex={0}` and
+`:focus-within` styling; clicking anywhere in a list (including its empty
+background, not just a row) gives it real browser focus, and Tab cycles
+between Now / stream / search / Templates like any keyboard-accessible web
+app. This is the boring, proven roving-tabindex/listbox pattern — it comes
+with Tab-key pane-switching and correct screen-reader focus announcement for
+free, instead of a custom JS variable that has to be kept in sync with
+whatever's visually focused by hand.
 
 - Arrow Up/Down move a visual highlight **cursor**, independent of the
   checkbox multi-select.
@@ -253,12 +319,29 @@ other apps and are worth the investment.
 
 - All new Tauri commands follow the existing `CmdResult<T>` / `map_err`
   pattern in `commands.rs` — no new error-handling convention introduced.
+- **Acting on an already-soft-deleted row needs no new error variant.** The
+  codebase already has a tested `CaptureNotFound`/`TemplateNotFound`
+  convention (`error.rs`, used consistently by `mark_done`/`promote`/
+  `reorder`/etc.). Every id-based lookup simply adds `deleted_at IS NULL` to
+  its `WHERE` clause, so a soft-deleted row falls through to the exact same
+  `NotFound` error a genuinely-missing row already produces — covering the
+  real race where one window deletes an item while another still holds a
+  stale reference to it (e.g. from before its last refresh).
 - Assigning a `section_id` that doesn't exist (deleted between menu-open and
   click, e.g. via a concurrent GUI window) returns an error rather than
   silently creating a dangling reference.
 - Restoring a capture/template whose section was deleted in the meantime
   restores with `section_id = NULL` (already cleared by the section's own
   soft-delete cascade above) rather than erroring.
+
+## Cross-window sync
+
+The main window and pinned dock already sync via plain Tauri broadcast
+events (`now:changed`, `capture:updated` — see `apps/desktop/src/lib/events.ts`).
+Every new mutation in this batch (delete/restore, section create/rename/
+reorder/delete, section/project (re)assignment, edit) follows the same
+pattern — no new sync mechanism invented. Exact event names/payloads are an
+implementation-plan detail, not a design-level decision.
 
 ## Testing / verification
 
@@ -273,12 +356,16 @@ other apps and are worth the investment.
   regression for content that predates this feature).
 - **Security:** a capture body containing raw HTML (e.g. `<img onerror=...>`)
   renders as inert text, not executed, confirming `rehype-raw` is absent.
-- **UI:** context-menu batch behavior (2+ selected vs. single); keyboard
-  cursor/checkbox independence (arrow keys never mutate the selection, Space
-  never moves the cursor); single-key shortcuts are inert while any text
-  input has focus; Custom Shortcuts rebind takes effect without restart, and
-  a deliberately-conflicting rebind surfaces a visible failure rather than a
-  false success.
+- **UI:** context-menu and `MergeToolbar` batch behavior (2+ selected vs.
+  single, both entry points reach the same actions); keyboard cursor/checkbox
+  independence (arrow keys never mutate the selection, Space never moves the
+  cursor); Tab cycles focus between Now/stream/search/Templates and arrow
+  keys apply to whichever list currently holds real DOM focus; single-key
+  shortcuts are inert while any text input has focus; Custom Shortcuts
+  rebind takes effect without restart, and a deliberately-conflicting rebind
+  surfaces a visible failure rather than a false success; single-item Copy
+  on a screenshot places real image bytes on the clipboard, pasteable into
+  another app as an image.
 - **Concurrency (matches existing critical-test tier in `docs/design.md`):**
   two GUI windows/processes racing a section delete against an item promotion
   don't corrupt state, consistent with the existing `BEGIN IMMEDIATE` leasing
