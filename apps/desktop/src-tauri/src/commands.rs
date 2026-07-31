@@ -397,6 +397,34 @@ pub fn copy_capture_image(
         .map_err(|e| e.to_string())
 }
 
+/// Plain-text "Copy": the capture's body, or its OCR text for a screenshot,
+/// or an honest placeholder -- see `Store::capture_display_text`. Same
+/// `AppHandle::clipboard()` access pattern as `copy_capture_image`, since
+/// the plugin manages its own state internally rather than living on
+/// `AppState`.
+#[tauri::command]
+pub fn copy_capture_text(app: AppHandle, state: State<AppState>, id: i64) -> CmdResult<()> {
+    let text = map_err(state.store.capture_display_text(id))?;
+    app.clipboard().write_text(text).map_err(|e| e.to_string())
+}
+
+/// "Copy as List": each selected capture's display text as one line of a
+/// Markdown checklist (`- [ ] <text>`), joined into a single clipboard
+/// write -- e.g. for pasting straight into a GitHub issue or PR body.
+#[tauri::command]
+pub fn copy_captures_as_checklist(
+    app: AppHandle,
+    state: State<AppState>,
+    ids: Vec<i64>,
+) -> CmdResult<()> {
+    let mut out = String::new();
+    for id in ids {
+        let text = map_err(state.store.capture_display_text(id))?;
+        out.push_str(&format!("- [ ] {text}\n"));
+    }
+    app.clipboard().write_text(out).map_err(|e| e.to_string())
+}
+
 /// Opens System Settings directly to the Accessibility pane, rather than
 /// triggering AXIsProcessTrustedWithOptions' own prompt dialog -- that API
 /// needs a CFDictionary built with the kAXTrustedCheckOptionPrompt key,

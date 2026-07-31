@@ -133,4 +133,9 @@ export const api = {
     invoke<string | null>("get_blob_image_data_url", { captureId }),
 
   copyCaptureImage: (captureId: number) => invoke<void>("copy_capture_image", { captureId }),
+
+  copyCaptureText: (id: number) => invoke<void>("copy_capture_text", { id }),
+
+  copyCapturesAsChecklist: (ids: number[]) =>
+    invoke<void>("copy_captures_as_checklist", { ids }),
 };

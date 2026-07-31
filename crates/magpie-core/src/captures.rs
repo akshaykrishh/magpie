@@ -77,6 +77,23 @@ impl Store {
         self.with_conn(|conn| get_capture_tx(conn, id))
     }
 
+    /// The text to show/copy for a capture: its body, or (for a screenshot,
+    /// whose body is always empty -- see capture_flow.rs's
+    /// on_screenshot_hotkey) its OCR text, or an honest placeholder if OCR
+    /// hasn't finished yet. Never a silent blank line -- see
+    /// docs/superpowers/specs/2026-07-31-capture-list-v2-design.md's
+    /// "Copy / Copy as List".
+    pub fn capture_display_text(&self, id: i64) -> Result<String> {
+        let capture = self.get_capture(id)?;
+        if !capture.body.is_empty() {
+            return Ok(capture.body);
+        }
+        let blob = self.get_blob_for_capture(id)?;
+        Ok(blob
+            .and_then(|b| b.ocr_text)
+            .unwrap_or_else(|| "[screenshot — OCR pending]".to_string()))
+    }
+
     /// The full stream, reverse-chronological. `project_id: Some(None)`
     /// means "Inbox only"; `None` means "every project, unfiltered" -- the
     /// stream is meant to stay searchable across everything.
@@ -660,5 +677,24 @@ mod tests {
         assert_eq!(purged, 1);
         assert!(store.get_capture(old.id).is_err());
         assert!(store.get_capture(recent.id).is_ok());
+    }
+
+    #[test]
+    fn capture_display_text_falls_back_to_ocr_then_placeholder() {
+        let store = Store::open_in_memory().unwrap();
+        let text_capture = store.capture("hello", None).unwrap();
+        assert_eq!(store.capture_display_text(text_capture.id).unwrap(), "hello");
+
+        let shot = store
+            .capture_screenshot("/tmp/shot.png", "image/png", None, None, None)
+            .unwrap();
+        assert_eq!(
+            store.capture_display_text(shot.id).unwrap(),
+            "[screenshot — OCR pending]"
+        );
+
+        let blob = store.get_blob_for_capture(shot.id).unwrap().unwrap();
+        store.set_blob_ocr_text(blob.id, "receipt total").unwrap();
+        assert_eq!(store.capture_display_text(shot.id).unwrap(), "receipt total");
     }
 }

@@ -100,6 +100,8 @@ pub fn run() {
             commands::get_capture_blob,
             commands::get_blob_image_data_url,
             commands::copy_capture_image,
+            commands::copy_capture_text,
+            commands::copy_captures_as_checklist,
             commands::get_template_variables,
             commands::instantiate_template_with_values,
             commands::list_sessions,
