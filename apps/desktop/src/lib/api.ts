@@ -7,6 +7,7 @@ import type {
   Project,
   ProjectFilter,
   ProjectOverview,
+  Section,
   Session,
   Tag,
   Template,
@@ -87,6 +88,26 @@ export const api = {
     invoke<Template>("update_template", { id, title, body }),
 
   deleteTemplate: (id: number) => invoke<void>("delete_template", { id }),
+
+  deleteCapture: (id: number) => invoke<Capture>("delete_capture", { id }),
+  restoreCapture: (id: number) => invoke<Capture>("restore_capture", { id }),
+  listRecentlyDeletedCaptures: () =>
+    invoke<Capture[]>("list_recently_deleted_captures"),
+  restoreTemplate: (id: number) => invoke<Template>("restore_template", { id }),
+  listRecentlyDeletedTemplates: () =>
+    invoke<Template[]>("list_recently_deleted_templates"),
+  createSection: (name: string) => invoke<Section>("create_section", { name }),
+  renameSection: (id: number, name: string) =>
+    invoke<Section>("rename_section", { id, name }),
+  listSections: () => invoke<Section[]>("list_sections"),
+  reorderSection: (id: number, afterId: number | null) =>
+    invoke<Section>("reorder_section", { id, afterId }),
+  deleteSection: (id: number) => invoke<void>("delete_section", { id }),
+  restoreSection: (id: number) => invoke<Section>("restore_section", { id }),
+  assignCaptureSection: (id: number, sectionId: number | null) =>
+    invoke<Capture>("assign_capture_section", { id, sectionId }),
+  assignTemplateSection: (id: number, sectionId: number | null) =>
+    invoke<Template>("assign_template_section", { id, sectionId }),
 
   instantiateTemplate: (templateId: number, projectId: number | null) =>
     invoke<Capture>("instantiate_template", { templateId, projectId }),

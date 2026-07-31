@@ -69,6 +69,14 @@ export interface Tag {
   name: string;
 }
 
+export interface Section {
+  id: number;
+  name: string;
+  position: number;
+  created_at: string;
+  deleted_at: string | null;
+}
+
 export interface Template {
   id: number;
   title: string;

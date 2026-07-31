@@ -1,7 +1,9 @@
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use magpie_capture::Capabilities;
-use magpie_core::{AuditEntry, Blob, Capture, Project, ProjectOverview, Session, Tag, Template};
+use magpie_core::{
+    AuditEntry, Blob, Capture, Project, ProjectOverview, Section, Session, Tag, Template,
+};
 use serde::Deserialize;
 use tauri::State;
 
@@ -208,6 +210,83 @@ pub fn update_template(
 #[tauri::command]
 pub fn delete_template(state: State<AppState>, id: i64) -> CmdResult<()> {
     map_err(state.store.delete_template(id))
+}
+
+#[tauri::command]
+pub fn delete_capture(state: State<AppState>, id: i64) -> CmdResult<Capture> {
+    map_err(state.store.soft_delete_capture(id))
+}
+
+#[tauri::command]
+pub fn restore_capture(state: State<AppState>, id: i64) -> CmdResult<Capture> {
+    map_err(state.store.restore_capture(id))
+}
+
+#[tauri::command]
+pub fn list_recently_deleted_captures(state: State<AppState>) -> CmdResult<Vec<Capture>> {
+    map_err(state.store.list_recently_deleted_captures())
+}
+
+#[tauri::command]
+pub fn restore_template(state: State<AppState>, id: i64) -> CmdResult<Template> {
+    map_err(state.store.restore_template(id))
+}
+
+#[tauri::command]
+pub fn list_recently_deleted_templates(state: State<AppState>) -> CmdResult<Vec<Template>> {
+    map_err(state.store.list_recently_deleted_templates())
+}
+
+#[tauri::command]
+pub fn create_section(state: State<AppState>, name: String) -> CmdResult<Section> {
+    map_err(state.store.create_section(&name))
+}
+
+#[tauri::command]
+pub fn rename_section(state: State<AppState>, id: i64, name: String) -> CmdResult<Section> {
+    map_err(state.store.rename_section(id, &name))
+}
+
+#[tauri::command]
+pub fn list_sections(state: State<AppState>) -> CmdResult<Vec<Section>> {
+    map_err(state.store.list_sections())
+}
+
+#[tauri::command]
+pub fn reorder_section(
+    state: State<AppState>,
+    id: i64,
+    after_id: Option<i64>,
+) -> CmdResult<Section> {
+    map_err(state.store.reorder_section(id, after_id))
+}
+
+#[tauri::command]
+pub fn delete_section(state: State<AppState>, id: i64) -> CmdResult<()> {
+    map_err(state.store.delete_section(id))
+}
+
+#[tauri::command]
+pub fn restore_section(state: State<AppState>, id: i64) -> CmdResult<Section> {
+    map_err(state.store.restore_section(id))
+}
+
+#[tauri::command]
+pub fn assign_capture_section(
+    state: State<AppState>,
+    id: i64,
+    section_id: Option<i64>,
+) -> CmdResult<Capture> {
+    map_err(state.store.assign_capture_section(id, section_id))
+}
+
+#[tauri::command]
+pub fn assign_template_section(
+    state: State<AppState>,
+    id: i64,
+    section_id: Option<i64>,
+) -> CmdResult<Template> {
+    map_err(state.store.assign_template_section(id, section_id))
 }
 
 #[tauri::command]
