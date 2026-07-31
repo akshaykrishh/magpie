@@ -374,14 +374,23 @@ mod tests {
     #[test]
     fn assigning_a_capture_touches_its_project_recency() {
         let store = Store::open_in_memory().unwrap();
-        let proj = store
+        store
             .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
             .unwrap();
+        let b = store
+            .get_or_create_project("b", Some("git@github.com:x/b.git"), None)
+            .unwrap();
+        // Re-touch a so it outranks b by recency despite its lower id --
+        // this establishes that assigning a capture to b (below) is what
+        // moves b back to the top, not creation order or an id tie-break.
+        store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+
         let capture = store.capture("something", None).unwrap();
+        store.assign_project(capture.id, Some(b.id)).unwrap();
 
-        store.assign_project(capture.id, Some(proj.id)).unwrap();
-
-        let refreshed = store.get_project(proj.id).unwrap();
-        assert!(refreshed.last_active_at.is_some());
+        let ranked = store.list_projects_by_recency(10).unwrap();
+        assert_eq!(ranked[0].id, b.id);
     }
 }

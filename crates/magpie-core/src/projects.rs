@@ -189,14 +189,16 @@ mod tests {
         let b = store
             .get_or_create_project("b", Some("git@github.com:x/b.git"), None)
             .unwrap();
-        // Touch b again, after a -- b should now rank first.
+        // a has the lower id (created first), so an id-descending tie-break
+        // alone would rank b first. Re-touch a -- if that actually worked,
+        // a (despite its lower id) must now outrank b.
         store
-            .get_or_create_project("b", Some("git@github.com:x/b.git"), None)
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
             .unwrap();
 
         let ranked = store.list_projects_by_recency(10).unwrap();
-        assert_eq!(ranked[0].id, b.id);
-        assert_eq!(ranked[1].id, a.id);
+        assert_eq!(ranked[0].id, a.id);
+        assert_eq!(ranked[1].id, b.id);
     }
 
     #[test]
