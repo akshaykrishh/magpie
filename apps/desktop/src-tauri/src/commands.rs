@@ -5,7 +5,8 @@ use magpie_core::{
     AuditEntry, Blob, Capture, Project, ProjectOverview, Section, Session, Tag, Template,
 };
 use serde::Deserialize;
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use crate::state::AppState;
 
@@ -370,6 +371,30 @@ pub fn get_blob_image_data_url(
         blob.mime,
         BASE64.encode(bytes)
     )))
+}
+
+/// Copies a screenshot capture's actual image onto the OS clipboard --
+/// matching Finder/Preview's native "Copy" on an image -- rather than a
+/// text derivative (e.g. the file path or a data URL). The
+/// clipboard-manager plugin's `write_image` wants a decoded
+/// `tauri::image::Image` (raw RGBA + dimensions, not raw PNG bytes), so
+/// `Image::from_bytes` decodes the PNG read off disk before it's handed
+/// to the clipboard. Plugin access goes through `AppHandle::clipboard()`
+/// (the `ClipboardExt` trait) rather than `AppState`, since the plugin
+/// manages its own state internally instead of living on this app's.
+#[tauri::command]
+pub fn copy_capture_image(
+    app: AppHandle,
+    state: State<AppState>,
+    capture_id: i64,
+) -> CmdResult<()> {
+    let blob = map_err(state.store.get_blob_for_capture(capture_id))?
+        .ok_or_else(|| format!("capture {capture_id} has no image blob"))?;
+    let bytes = std::fs::read(&blob.path).map_err(|e| e.to_string())?;
+    let image = tauri::image::Image::from_bytes(&bytes).map_err(|e| e.to_string())?;
+    app.clipboard()
+        .write_image(&image)
+        .map_err(|e| e.to_string())
 }
 
 /// Opens System Settings directly to the Accessibility pane, rather than

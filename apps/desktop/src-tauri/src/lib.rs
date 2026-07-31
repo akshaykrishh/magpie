@@ -31,6 +31,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin({
             let capture_shortcut: Shortcut = HOTKEY.parse().expect("invalid hotkey spec");
             let screenshot_shortcut: Shortcut =
@@ -98,6 +99,7 @@ pub fn run() {
             commands::list_audit,
             commands::get_capture_blob,
             commands::get_blob_image_data_url,
+            commands::copy_capture_image,
             commands::get_template_variables,
             commands::instantiate_template_with_values,
             commands::list_sessions,
