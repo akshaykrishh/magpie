@@ -1,11 +1,12 @@
 import { listen } from "@tauri-apps/api/event";
 import { formatDistanceToNow } from "date-fns";
-import { ArrowUpToLine, Check, GripVertical, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { GripVertical } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { CAPTURE_UPDATED_EVENT } from "@/lib/events";
 import type { Blob as CaptureBlob, Capture } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { ContextMenu, ContextMenuTrigger, type ContextMenuItem } from "./ContextMenu";
 import { MarkdownBody } from "./MarkdownBody";
 
 interface CaptureItemProps {
@@ -33,6 +34,8 @@ export function CaptureItem({
   const timestamp = formatDistanceToNow(new Date(capture.created_at), {
     addSuffix: true,
   });
+
+  const menuOpenRef = useRef<((x: number, y: number) => void) | null>(null);
 
   const [blob, setBlob] = useState<CaptureBlob | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -69,6 +72,10 @@ export function CaptureItem({
 
   return (
     <div
+      onContextMenu={(e) => {
+        e.preventDefault();
+        menuOpenRef.current?.(e.clientX, e.clientY);
+      }}
       className={cn(
         "group flex items-start gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2.5",
         "dark:border-neutral-800 dark:bg-neutral-900",
@@ -121,38 +128,18 @@ export function CaptureItem({
         </p>
       </div>
 
-      <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-        {onDone && (
-          <button
-            type="button"
-            title="Mark done"
-            onClick={() => onDone(capture.id)}
-            className="rounded p-1.5 text-neutral-400 hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-950"
-          >
-            <Check size={16} />
-          </button>
-        )}
-        {onPromote && (
-          <button
-            type="button"
-            title="Promote to Now"
-            onClick={() => onPromote(capture.id)}
-            className="rounded p-1.5 text-neutral-400 hover:bg-slate-teal/10 hover:text-slate-teal dark:hover:bg-slate-teal-light/15"
-          >
-            <ArrowUpToLine size={16} />
-          </button>
-        )}
-        {onDemote && (
-          <button
-            type="button"
-            title="Remove from Now"
-            onClick={() => onDemote(capture.id)}
-            className="rounded p-1.5 text-neutral-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
-          >
-            <X size={16} />
-          </button>
-        )}
+      <div className="shrink-0">
+        <ContextMenuTrigger onOpen={(x, y) => menuOpenRef.current?.(x, y)} />
+        <ContextMenu items={buildContextMenuItems()} openRef={menuOpenRef} />
       </div>
     </div>
   );
+
+  function buildContextMenuItems(): ContextMenuItem[] {
+    const items: ContextMenuItem[] = [];
+    if (onDone) items.push({ label: "Mark Done", onClick: () => onDone(capture.id) });
+    if (onPromote) items.push({ label: "Promote to Now", onClick: () => onPromote(capture.id) });
+    if (onDemote) items.push({ label: "Remove from Now", onClick: () => onDemote(capture.id) });
+    return items;
+  }
 }
