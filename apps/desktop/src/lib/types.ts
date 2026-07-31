@@ -5,6 +5,7 @@
 
 export interface Capture {
   id: number;
+  kind: string;
   body: string;
   created_at: string;
   done_at: string | null;
@@ -16,6 +17,10 @@ export interface Capture {
   lease_client: string | null;
   lease_pid: number | null;
   lease_at: string | null;
+  lease_head_commit: string | null;
+  handback_note: string | null;
+  diff_stat: string | null;
+  handback_at: string | null;
   source_id: number | null;
   merged_into: number | null;
 }
@@ -26,6 +31,37 @@ export interface Project {
   remote_url: string | null;
   common_git_dir: string | null;
   created_at: string;
+  last_active_at: string | null;
+}
+
+export interface Session {
+  id: string;
+  client: string | null;
+  pid: number;
+  project_id: number | null;
+  branch: string | null;
+  started_at: string;
+  last_active_at: string | null;
+  ended_at: string | null;
+  leased_count: number;
+  completed_count: number;
+  failed_count: number;
+  handback_count: number;
+  captures_during_session: number | null;
+  unpromoted_at_end: number | null;
+}
+
+// Not a raw table row -- a computed rollup (see
+// crates/magpie-core/src/projects.rs's list_projects_overview). project_id
+// is null for the pinned "Inbox" entry, which is always present even with
+// zero projects.
+export interface ProjectOverview {
+  project_id: number | null;
+  project_name: string;
+  now_count: number;
+  leased_count: number;
+  needs_review_count: number;
+  active_session_count: number;
 }
 
 export interface Tag {
