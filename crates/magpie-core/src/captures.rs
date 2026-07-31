@@ -144,7 +144,12 @@ impl Store {
     /// first via `assign_project` if it needs one.
     pub fn promote(&self, id: i64) -> Result<Capture> {
         self.with_conn(|conn| {
-            let capture = get_capture_tx(conn, id)?;
+            // Active-only fetch: a soft-deleted capture must look not-found,
+            // same as every other id-based lookup on captures/templates --
+            // this must run before the digest check below so a deleted
+            // digest still reports CaptureNotFound rather than
+            // CannotPromoteDigest.
+            let capture = get_active_capture_tx(conn, id)?;
             if capture.is_session_digest() {
                 return Err(Error::CannotPromoteDigest(id));
             }
@@ -155,10 +160,10 @@ impl Store {
             )?;
             let new_pos = max_pos.unwrap_or(0.0) + 1024.0;
             conn.execute(
-                "UPDATE captures SET queue_pos = ?1 WHERE id = ?2",
+                "UPDATE captures SET queue_pos = ?1 WHERE id = ?2 AND deleted_at IS NULL",
                 params![new_pos, id],
             )?;
-            get_capture_tx(conn, id)
+            get_active_capture_tx(conn, id)
         })
     }
 
@@ -168,14 +173,12 @@ impl Store {
     /// `captures_fts_au` trigger, keeping full-text search in sync.
     pub fn update_capture_body(&self, id: i64, body: &str) -> Result<Capture> {
         self.with_conn(|conn| {
-            let capture = get_capture_tx(conn, id)?;
-            // A soft-deleted capture must look not-found, same as every other
-            // id-based lookup on captures/templates -- otherwise the UPDATE
-            // below (scoped to `deleted_at IS NULL`) would silently match zero
-            // rows and this would return Ok with the edit discarded.
-            if capture.deleted_at.is_some() {
-                return Err(Error::CaptureNotFound(id));
-            }
+            // Active-only fetch: a soft-deleted capture must look not-found,
+            // same as every other id-based lookup on captures/templates --
+            // otherwise the UPDATE below (scoped to `deleted_at IS NULL`)
+            // would silently match zero rows and this would return Ok with
+            // the edit discarded.
+            let capture = get_active_capture_tx(conn, id)?;
             if capture.is_session_digest() {
                 return Err(Error::CannotEditDigest(id));
             }
@@ -183,7 +186,7 @@ impl Store {
                 "UPDATE captures SET body = ?1 WHERE id = ?2 AND deleted_at IS NULL",
                 params![body, id],
             )?;
-            get_capture_tx(conn, id)
+            get_active_capture_tx(conn, id)
         })
     }
 
@@ -191,10 +194,10 @@ impl Store {
     pub fn demote(&self, id: i64) -> Result<Capture> {
         self.with_conn(|conn| {
             conn.execute(
-                "UPDATE captures SET queue_pos = NULL WHERE id = ?1",
+                "UPDATE captures SET queue_pos = NULL WHERE id = ?1 AND deleted_at IS NULL",
                 params![id],
             )?;
-            get_capture_tx(conn, id)
+            get_active_capture_tx(conn, id)
         })
     }
 
@@ -204,13 +207,13 @@ impl Store {
     /// reordering never requires renumbering the rest of the list.
     pub fn reorder(&self, id: i64, after_id: Option<i64>) -> Result<Capture> {
         self.with_conn(|conn| {
-            let capture = get_capture_tx(conn, id)?;
+            let capture = get_active_capture_tx(conn, id)?;
             let project_id = capture.project_id;
 
             let prev_pos: Option<f64> = match after_id {
                 Some(after_id) => Some(
                     conn.query_row(
-                        "SELECT queue_pos FROM captures WHERE id = ?1",
+                        "SELECT queue_pos FROM captures WHERE id = ?1 AND deleted_at IS NULL",
                         params![after_id],
                         |r| r.get(0),
                     )
@@ -241,43 +244,43 @@ impl Store {
             };
 
             conn.execute(
-                "UPDATE captures SET queue_pos = ?1 WHERE id = ?2",
+                "UPDATE captures SET queue_pos = ?1 WHERE id = ?2 AND deleted_at IS NULL",
                 params![new_pos, id],
             )?;
-            get_capture_tx(conn, id)
+            get_active_capture_tx(conn, id)
         })
     }
 
     pub fn mark_done(&self, id: i64) -> Result<Capture> {
         self.with_conn(|conn| {
             conn.execute(
-                "UPDATE captures SET done_at = ?1 WHERE id = ?2",
+                "UPDATE captures SET done_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
                 params![now_iso(), id],
             )?;
-            get_capture_tx(conn, id)
+            get_active_capture_tx(conn, id)
         })
     }
 
     pub fn reopen(&self, id: i64) -> Result<Capture> {
         self.with_conn(|conn| {
             conn.execute(
-                "UPDATE captures SET done_at = NULL WHERE id = ?1",
+                "UPDATE captures SET done_at = NULL WHERE id = ?1 AND deleted_at IS NULL",
                 params![id],
             )?;
-            get_capture_tx(conn, id)
+            get_active_capture_tx(conn, id)
         })
     }
 
     pub fn assign_project(&self, id: i64, project_id: Option<i64>) -> Result<Capture> {
         self.with_conn(|conn| {
             conn.execute(
-                "UPDATE captures SET project_id = ?1 WHERE id = ?2",
+                "UPDATE captures SET project_id = ?1 WHERE id = ?2 AND deleted_at IS NULL",
                 params![project_id, id],
             )?;
             if let Some(project_id) = project_id {
                 crate::projects::touch_project_active_tx(conn, project_id)?;
             }
-            get_capture_tx(conn, id)
+            get_active_capture_tx(conn, id)
         })
     }
 
@@ -296,10 +299,12 @@ impl Store {
                 "UPDATE captures SET section_id = ?1 WHERE id = ?2 AND deleted_at IS NULL",
                 params![section_id, id],
             )?;
-            let sql = format!("SELECT {CAPTURE_COLUMNS} FROM captures WHERE id = ?1");
-            conn.query_row(&sql, params![id], capture_from_row)
-                .optional()?
-                .ok_or(Error::CaptureNotFound(id))
+            // Reuses the same active-only refetch helper every other
+            // mutate-then-refetch call site in this file uses -- a
+            // soft-deleted row (or one deleted concurrently between the
+            // UPDATE above and this refetch) must fall through to
+            // CaptureNotFound rather than Ok(capture-with-stale-section_id).
+            get_active_capture_tx(conn, id)
         })
     }
 
@@ -367,6 +372,26 @@ impl Store {
 
 pub(crate) fn get_capture_tx(conn: &rusqlite::Connection, id: i64) -> Result<Capture> {
     let sql = format!("SELECT {CAPTURE_COLUMNS} FROM captures WHERE id = ?1");
+    conn.query_row(&sql, params![id], capture_from_row)
+        .optional()?
+        .ok_or(Error::CaptureNotFound(id))
+}
+
+/// Same as `get_capture_tx`, but treats a soft-deleted row as not-found.
+/// Used by every mutate-then-refetch call site (`promote`, `demote`,
+/// `reorder`, `mark_done`, `reopen`, `assign_project`,
+/// `assign_capture_section`, `update_capture_body`, `merge`) so that acting
+/// on a soft-deleted capture -- or one soft-deleted concurrently between the
+/// mutating UPDATE and the refetch -- falls through to the same
+/// `Error::CaptureNotFound` a genuinely-missing row already produces,
+/// instead of silently succeeding with a no-op UPDATE. See
+/// docs/superpowers/specs/2026-07-31-capture-list-v2-design.md's "Error
+/// handling" section.
+///
+/// Do NOT use this for `get_capture`, `restore_capture`, or anywhere else a
+/// caller legitimately needs to see a soft-deleted row's current state.
+pub(crate) fn get_active_capture_tx(conn: &rusqlite::Connection, id: i64) -> Result<Capture> {
+    let sql = format!("SELECT {CAPTURE_COLUMNS} FROM captures WHERE id = ?1 AND deleted_at IS NULL");
     conn.query_row(&sql, params![id], capture_from_row)
         .optional()?
         .ok_or(Error::CaptureNotFound(id))
@@ -743,6 +768,46 @@ mod tests {
         assert_eq!(purged, 1);
         assert!(store.get_capture(old.id).is_err());
         assert!(store.get_capture(recent.id).is_ok());
+    }
+
+    #[test]
+    fn promote_treats_a_soft_deleted_capture_as_not_found() {
+        // Same class of bug as update_capture_body_treats_a_soft_deleted_capture_as_not_found
+        // above, but for a pre-existing mutator this batch newly exposed
+        // through the unified action surface (Task 20/21/24) without ever
+        // retrofitting the deleted_at guard onto it.
+        let store = Store::open_in_memory().unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.soft_delete_capture(c.id).unwrap();
+
+        let err = store.promote(c.id).unwrap_err();
+        assert!(matches!(err, Error::CaptureNotFound(id) if id == c.id));
+    }
+
+    #[test]
+    fn mark_done_treats_a_soft_deleted_capture_as_not_found() {
+        let store = Store::open_in_memory().unwrap();
+        let c = store.capture("finish me", None).unwrap();
+        store.soft_delete_capture(c.id).unwrap();
+
+        let err = store.mark_done(c.id).unwrap_err();
+        assert!(matches!(err, Error::CaptureNotFound(id) if id == c.id));
+    }
+
+    #[test]
+    fn assign_capture_section_refetch_treats_a_soft_deleted_capture_as_not_found() {
+        // Task 3's known re-fetch bug: the UPDATE was already guarded with
+        // `AND deleted_at IS NULL`, but the refetch afterward used the
+        // unfiltered get_capture_tx, so a soft-deleted capture's no-op
+        // UPDATE would still return Ok(capture) with the unchanged
+        // section_id instead of CaptureNotFound.
+        let store = Store::open_in_memory().unwrap();
+        let c = store.capture("note", None).unwrap();
+        let s = store.create_section("A").unwrap();
+        store.soft_delete_capture(c.id).unwrap();
+
+        let err = store.assign_capture_section(c.id, Some(s.id)).unwrap_err();
+        assert!(matches!(err, Error::CaptureNotFound(id) if id == c.id));
     }
 
     #[test]

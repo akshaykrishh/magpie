@@ -171,7 +171,14 @@ impl Store {
                 "UPDATE templates SET section_id = ?1 WHERE id = ?2 AND deleted_at IS NULL",
                 params![section_id, id],
             )?;
-            get_template_tx(conn, id)
+            // Active-only refetch: a soft-deleted template (or one deleted
+            // concurrently between the UPDATE above and this refetch) must
+            // fall through to TemplateNotFound rather than Ok(template with
+            // an unchanged section_id) -- same bug class as captures.rs's
+            // mutators, fixed the same way. See
+            // docs/superpowers/specs/2026-07-31-capture-list-v2-design.md's
+            // "Error handling" section.
+            get_active_template_tx(conn, id)
         })
     }
 
@@ -187,6 +194,19 @@ impl Store {
 
 fn get_template_tx(conn: &rusqlite::Connection, id: i64) -> Result<Template> {
     let sql = format!("SELECT {TEMPLATE_COLUMNS} FROM templates WHERE id = ?1");
+    conn.query_row(&sql, params![id], template_from_row)
+        .optional()?
+        .ok_or(Error::TemplateNotFound(id))
+}
+
+/// Same as `get_template_tx`, but treats a soft-deleted row as not-found --
+/// see `captures::get_active_capture_tx`'s doc comment for the full
+/// rationale (the same convention, applied to templates). Used by
+/// `assign_template_section`'s refetch; do NOT use this for `get_template`
+/// or `restore_template`, which legitimately need to see a soft-deleted row.
+fn get_active_template_tx(conn: &rusqlite::Connection, id: i64) -> Result<Template> {
+    let sql =
+        format!("SELECT {TEMPLATE_COLUMNS} FROM templates WHERE id = ?1 AND deleted_at IS NULL");
     conn.query_row(&sql, params![id], template_from_row)
         .optional()?
         .ok_or(Error::TemplateNotFound(id))
@@ -339,6 +359,22 @@ mod tests {
         let restored = store.restore_template(t.id).unwrap();
         assert_eq!(restored.deleted_at, None);
         assert_eq!(store.list_templates().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn assign_template_section_refetch_treats_a_soft_deleted_template_as_not_found() {
+        // Same Task-3 re-fetch bug as captures: the UPDATE was already
+        // guarded with `AND deleted_at IS NULL`, but the refetch afterward
+        // used the unfiltered get_template_tx, so a soft-deleted template's
+        // no-op UPDATE would still return Ok(template) with the unchanged
+        // section_id instead of TemplateNotFound.
+        let store = Store::open_in_memory().unwrap();
+        let t = store.create_template("title", "body").unwrap();
+        let s = store.create_section("Prompts").unwrap();
+        store.delete_template(t.id).unwrap();
+
+        let err = store.assign_template_section(t.id, Some(s.id)).unwrap_err();
+        assert!(matches!(err, Error::TemplateNotFound(id) if id == t.id));
     }
 
     #[test]

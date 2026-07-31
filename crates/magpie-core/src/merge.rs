@@ -1,6 +1,6 @@
 use rusqlite::params;
 
-use crate::captures::{capture_from_row, get_capture_tx, CAPTURE_COLUMNS};
+use crate::captures::{capture_from_row, get_active_capture_tx, get_capture_tx, CAPTURE_COLUMNS};
 use crate::db::now_iso;
 use crate::error::{Error, Result};
 use crate::model::Capture;
@@ -25,9 +25,16 @@ impl Store {
         self.with_conn(|conn| {
             let tx = conn.unchecked_transaction()?;
 
+            // Active-only fetch: merging a soft-deleted capture (or one
+            // deleted between selection and this call, e.g. from another
+            // window) must fail with the same CaptureNotFound a genuinely
+            // missing id would, not silently absorb a deleted row's body
+            // into the new merged capture. See
+            // docs/superpowers/specs/2026-07-31-capture-list-v2-design.md's
+            // "Error handling" section.
             let mut sources = Vec::with_capacity(ids.len());
             for &id in ids {
-                sources.push(get_capture_tx(&tx, id)?);
+                sources.push(get_active_capture_tx(&tx, id)?);
             }
             sources.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
 
@@ -44,8 +51,11 @@ impl Store {
             let merged_id = tx.last_insert_rowid();
 
             for &id in ids {
+                // Guarded the same way as every other UPDATE in this batch
+                // -- defense in depth alongside the active-only fetch above,
+                // in case a source's deleted_at changes between the two.
                 tx.execute(
-                    "UPDATE captures SET merged_into = ?1 WHERE id = ?2",
+                    "UPDATE captures SET merged_into = ?1 WHERE id = ?2 AND deleted_at IS NULL",
                     params![merged_id, id],
                 )?;
             }
@@ -150,5 +160,27 @@ mod tests {
         let a = store.capture("solo", None).unwrap();
         let err = store.merge(&[a.id]).unwrap_err();
         assert!(matches!(err, Error::MergeNeedsAtLeastTwo));
+    }
+
+    #[test]
+    fn merging_a_soft_deleted_source_errors_instead_of_absorbing_it() {
+        // Same bug class as promote/mark_done/etc: merge() is a
+        // pre-existing mutator this batch newly exposed through the
+        // unified action surface without retrofitting the deleted_at
+        // guard. A soft-deleted capture must be rejected with
+        // CaptureNotFound, not silently merged in.
+        let store = Store::open_in_memory().unwrap();
+        let a = store.capture("first paragraph", None).unwrap();
+        let b = store.capture("second paragraph", None).unwrap();
+        store.soft_delete_capture(b.id).unwrap();
+
+        let err = store.merge(&[a.id, b.id]).unwrap_err();
+        assert!(matches!(err, Error::CaptureNotFound(id) if id == b.id));
+
+        // No orphaned merge result should have been created either -- the
+        // whole operation is one transaction, so the failed lookup must
+        // roll back any INSERT that happened before it.
+        let a_after = store.get_capture(a.id).unwrap();
+        assert_eq!(a_after.merged_into, None);
     }
 }
