@@ -24,7 +24,7 @@ import { SectionHeader } from "./components/SectionHeader";
 import { TemplatesPanel } from "./components/TemplatesPanel";
 import { UndoToast } from "./components/UndoToast";
 import { api } from "./lib/api";
-import { NOW_CHANGED_EVENT } from "./lib/events";
+import { NOW_CHANGED_EVENT, SECTIONS_CHANGED_EVENT } from "./lib/events";
 import type { Capabilities, Capture, Section } from "./lib/types";
 import { cn } from "./lib/utils";
 
@@ -193,10 +193,14 @@ function App() {
     // items independently -- this is what keeps this window's copy in sync
     // with changes made over there, and vice versa (see handlers below).
     const unlistenNow = listen(NOW_CHANGED_EVENT, refreshNow);
+    // Same cross-window sync, for sections renamed/reordered/deleted from
+    // the dock's own section headers.
+    const unlistenSections = listen(SECTIONS_CHANGED_EVENT, refreshSections);
     return () => {
       unlistenCapture.then((f) => f());
       unlistenCaptureUpdated.then((f) => f());
       unlistenNow.then((f) => f());
+      unlistenSections.then((f) => f());
     };
   }, [refreshStream, refreshNow, refreshSections]);
 
@@ -260,6 +264,7 @@ function App() {
   async function handleRenameSection(id: number, name: string) {
     await api.renameSection(id, name);
     refreshSections();
+    emit(SECTIONS_CHANGED_EVENT);
   }
 
   async function handleDeleteSection(id: number) {
@@ -270,6 +275,8 @@ function App() {
     refreshSections();
     refreshStream();
     refreshNow();
+    emit(SECTIONS_CHANGED_EVENT);
+    emit(NOW_CHANGED_EVENT);
   }
 
   async function handleReorderSection(id: number, afterId: number | null) {
@@ -284,6 +291,7 @@ function App() {
     });
     await api.reorderSection(id, afterId);
     refreshSections();
+    emit(SECTIONS_CHANGED_EVENT);
   }
 
   function handleSectionDragEnd(visible: Section[], event: DragEndEvent) {

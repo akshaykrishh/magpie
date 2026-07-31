@@ -39,7 +39,18 @@ export function SectionHeader({ section, onRename, onDelete, dragHandleProps }: 
         />
       ) : (
         <h3
-          onClick={() => setEditing(true)}
+          onClick={() => {
+            // Re-sync from the current name every time editing is entered --
+            // `draft` otherwise only reflects whatever `section.name` was at
+            // mount (or last edit), which goes stale the moment a rename
+            // lands from elsewhere (e.g. the other window, via
+            // SECTIONS_CHANGED_EVENT). Without this, editing without
+            // changing anything would blur with a stale `draft` that
+            // differs from the current `section.name` and silently revert
+            // the rename that landed in between.
+            setDraft(section.name);
+            setEditing(true);
+          }}
           className="cursor-text text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400"
         >
           {section.name}

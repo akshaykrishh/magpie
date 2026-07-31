@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AddPromptInput } from "./components/AddPromptInput";
 import { NowList } from "./components/NowList";
 import { api } from "./lib/api";
-import { NOW_CHANGED_EVENT } from "./lib/events";
+import { NOW_CHANGED_EVENT, SECTIONS_CHANGED_EVENT } from "./lib/events";
 import type { Capture, Section } from "./lib/types";
 
 /// The pinned dock: a compact, always-on-top view of Now, meant to sit
@@ -26,8 +26,10 @@ function DockApp() {
     refreshNow();
     refreshSections();
     const unlisten = listen(NOW_CHANGED_EVENT, refreshNow);
+    const unlistenSections = listen(SECTIONS_CHANGED_EVENT, refreshSections);
     return () => {
       unlisten.then((f) => f());
+      unlistenSections.then((f) => f());
     };
   }, [refreshNow, refreshSections]);
 
@@ -58,12 +60,15 @@ function DockApp() {
   async function handleRenameSection(id: number, name: string) {
     await api.renameSection(id, name);
     refreshSections();
+    emit(SECTIONS_CHANGED_EVENT);
   }
 
   async function handleDeleteSection(id: number) {
     await api.deleteSection(id);
     refreshSections();
     refreshNow();
+    emit(SECTIONS_CHANGED_EVENT);
+    emit(NOW_CHANGED_EVENT);
   }
 
   async function handleReorderSection(id: number, afterId: number | null) {
@@ -78,6 +83,7 @@ function DockApp() {
     });
     await api.reorderSection(id, afterId);
     refreshSections();
+    emit(SECTIONS_CHANGED_EVENT);
   }
 
   return (
