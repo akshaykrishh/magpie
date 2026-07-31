@@ -95,11 +95,33 @@ pub fn set_hotkey(
     // failure, restore the old binding so the app doesn't silently end up
     // with no hotkey registered at all, and report the failure honestly
     // rather than claiming success.
+    //
+    // The rollback registration can *itself* fail (narrow, but real: e.g.
+    // a transient OS/plugin error right after we just unregistered the old
+    // combo). That case must not be swallowed by a `let _ = ...` -- if it
+    // were, the caller would be told "still using {previous_combo}" while
+    // the app has genuinely lost its OS-level hotkey for `kind` entirely.
+    // `HotkeyRuntime`/the `settings` row are deliberately left pointing at
+    // `previous_combo` even here: that's still the user's last-known-good
+    // preference, and a future restart (or another rebind attempt) will
+    // try to re-register it again.
     if let Err(e) = gs.register(new_shortcut) {
-        let _ = gs.register(old_shortcut);
-        return Err(format!(
-            "could not register \"{combo}\": {e} (still using \"{previous_combo}\")"
-        ));
+        return Err(match gs.register(old_shortcut) {
+            Ok(()) => format!(
+                "could not register \"{combo}\": {e} (still using \"{previous_combo}\")"
+            ),
+            Err(rollback_err) => {
+                eprintln!(
+                    "set_hotkey: after failing to register \"{combo}\" ({e}), restoring \
+                     \"{previous_combo}\" also failed: {rollback_err}"
+                );
+                format!(
+                    "could not register \"{combo}\": {e}. Restoring the previous \
+                     \"{previous_combo}\" binding also failed: {rollback_err} -- no {kind} \
+                     hotkey is registered right now; try again or restart the app."
+                )
+            }
+        });
     }
 
     *current = new_shortcut;
