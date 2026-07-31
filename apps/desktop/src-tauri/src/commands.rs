@@ -233,6 +233,14 @@ pub fn list_recently_deleted_captures(state: State<AppState>) -> CmdResult<Vec<C
     map_err(state.store.list_recently_deleted_captures())
 }
 
+/// "Delete Permanently" in the Recently Deleted view -- a single-id hard
+/// delete, distinct from the bulk cutoff-based purge sweep. `Store` itself
+/// guards this to only ever affect an already-soft-deleted row.
+#[tauri::command]
+pub fn delete_capture_permanently(state: State<AppState>, id: i64) -> CmdResult<()> {
+    map_err(state.store.delete_capture_permanently(id))
+}
+
 #[tauri::command]
 pub fn restore_template(state: State<AppState>, id: i64) -> CmdResult<Template> {
     map_err(state.store.restore_template(id))
@@ -241,6 +249,13 @@ pub fn restore_template(state: State<AppState>, id: i64) -> CmdResult<Template> 
 #[tauri::command]
 pub fn list_recently_deleted_templates(state: State<AppState>) -> CmdResult<Vec<Template>> {
     map_err(state.store.list_recently_deleted_templates())
+}
+
+/// See `delete_capture_permanently`'s doc comment -- same shape, applied to
+/// templates.
+#[tauri::command]
+pub fn delete_template_permanently(state: State<AppState>, id: i64) -> CmdResult<()> {
+    map_err(state.store.delete_template_permanently(id))
 }
 
 #[tauri::command]

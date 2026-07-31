@@ -52,6 +52,33 @@ export function RecentlyDeletedView() {
     }
   }
 
+  // No confirmation dialog, consistent with the rest of the app (soft-delete
+  // + Undo replaces confirm() everywhere else, and this codebase has none).
+  // Permanent delete is the one place here with no further undo, but it's
+  // already reached through two deliberate steps -- the item was already
+  // soft-deleted once, and this view is a dedicated destination for exactly
+  // this action -- rather than a single misclick away from data loss the way
+  // an unprotected top-level delete button would be. The button itself is
+  // styled distinctly (red, separated from Restore) so it doesn't read as a
+  // second Restore action at a glance.
+  async function deleteCapturePermanently(id: number) {
+    try {
+      await api.deleteCapturePermanently(id);
+      refresh();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function deleteTemplatePermanently(id: number) {
+    try {
+      await api.deleteTemplatePermanently(id);
+      refresh();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   if (captures.length === 0 && templates.length === 0) {
     return (
       <p className="px-3 py-6 text-center text-sm text-neutral-400 dark:text-neutral-600">
@@ -78,13 +105,22 @@ export function RecentlyDeletedView() {
                 <span className="truncate text-neutral-700 dark:text-neutral-300">
                   {c.body || "(screenshot)"}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => restoreCapture(c.id)}
-                  className="shrink-0 text-slate-teal hover:underline dark:text-slate-teal-light"
-                >
-                  Restore
-                </button>
+                <div className="flex shrink-0 items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => restoreCapture(c.id)}
+                    className="text-slate-teal hover:underline dark:text-slate-teal-light"
+                  >
+                    Restore
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteCapturePermanently(c.id)}
+                    className="text-red-500 hover:underline dark:text-red-400"
+                  >
+                    Delete Permanently
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -106,13 +142,22 @@ export function RecentlyDeletedView() {
                 <span className="truncate text-neutral-700 dark:text-neutral-300">
                   {t.title}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => restoreTemplate(t.id)}
-                  className="shrink-0 text-slate-teal hover:underline dark:text-slate-teal-light"
-                >
-                  Restore
-                </button>
+                <div className="flex shrink-0 items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => restoreTemplate(t.id)}
+                    className="text-slate-teal hover:underline dark:text-slate-teal-light"
+                  >
+                    Restore
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteTemplatePermanently(t.id)}
+                    className="text-red-500 hover:underline dark:text-red-400"
+                  >
+                    Delete Permanently
+                  </button>
+                </div>
               </div>
             ))}
           </div>

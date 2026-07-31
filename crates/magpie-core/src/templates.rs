@@ -190,6 +190,21 @@ impl Store {
             )?)
         })
     }
+
+    /// Single-id hard-delete for "Delete Permanently" in the Recently
+    /// Deleted view -- see `captures::delete_capture_permanently`'s doc
+    /// comment for the full rationale (same shape, applied to templates).
+    /// The `deleted_at IS NOT NULL` guard ensures this can only ever remove
+    /// a row already soft-deleted, never an active one.
+    pub fn delete_template_permanently(&self, id: i64) -> Result<()> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "DELETE FROM templates WHERE id = ?1 AND deleted_at IS NOT NULL",
+                params![id],
+            )?;
+            Ok(())
+        })
+    }
 }
 
 fn get_template_tx(conn: &rusqlite::Connection, id: i64) -> Result<Template> {
@@ -375,6 +390,22 @@ mod tests {
 
         let err = store.assign_template_section(t.id, Some(s.id)).unwrap_err();
         assert!(matches!(err, Error::TemplateNotFound(id) if id == t.id));
+    }
+
+    #[test]
+    fn delete_template_permanently_only_removes_an_already_soft_deleted_row() {
+        let store = Store::open_in_memory().unwrap();
+        let active = store.create_template("active", "body").unwrap();
+        let deleted = store.create_template("deleted", "body").unwrap();
+        store.delete_template(deleted.id).unwrap();
+
+        // Must be a safe no-op on a non-deleted template -- this hard-delete
+        // may only ever remove a row that's already soft-deleted.
+        store.delete_template_permanently(active.id).unwrap();
+        assert!(store.get_template(active.id).is_ok());
+
+        store.delete_template_permanently(deleted.id).unwrap();
+        assert!(store.get_template(deleted.id).is_err());
     }
 
     #[test]

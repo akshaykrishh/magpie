@@ -368,6 +368,26 @@ impl Store {
             )?)
         })
     }
+
+    /// Single-id hard-delete for "Delete Permanently" in the Recently
+    /// Deleted view -- narrower than `purge_expired_captures` (bulk,
+    /// cutoff-based sweep). The `deleted_at IS NOT NULL` guard is a safety
+    /// invariant, not an optimization: it ensures this can only ever remove
+    /// a row that has already been soft-deleted, never an active one, no
+    /// matter what id is passed in. Calling it on an active capture (or a
+    /// missing id) is a safe no-op, matching `purge_expired_captures`'s own
+    /// silent-no-op-outside-the-cutoff behavior rather than introducing a
+    /// new error case for what the UI never lets happen (Delete Permanently
+    /// is only ever offered on rows already listed in Recently Deleted).
+    pub fn delete_capture_permanently(&self, id: i64) -> Result<()> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "DELETE FROM captures WHERE id = ?1 AND deleted_at IS NOT NULL",
+                params![id],
+            )?;
+            Ok(())
+        })
+    }
 }
 
 pub(crate) fn get_capture_tx(conn: &rusqlite::Connection, id: i64) -> Result<Capture> {
@@ -808,6 +828,24 @@ mod tests {
 
         let err = store.assign_capture_section(c.id, Some(s.id)).unwrap_err();
         assert!(matches!(err, Error::CaptureNotFound(id) if id == c.id));
+    }
+
+    #[test]
+    fn delete_capture_permanently_only_removes_an_already_soft_deleted_row() {
+        let store = Store::open_in_memory().unwrap();
+        let active = store.capture("still active", None).unwrap();
+        let deleted = store.capture("delete me", None).unwrap();
+        store.soft_delete_capture(deleted.id).unwrap();
+
+        // Calling it on a non-deleted capture must be a safe no-op -- this
+        // hard-delete may only ever remove a row that's already
+        // soft-deleted, never an active one, regardless of what id is
+        // passed in.
+        store.delete_capture_permanently(active.id).unwrap();
+        assert!(store.get_capture(active.id).is_ok());
+
+        store.delete_capture_permanently(deleted.id).unwrap();
+        assert!(store.get_capture(deleted.id).is_err());
     }
 
     #[test]

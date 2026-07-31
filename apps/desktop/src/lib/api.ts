@@ -97,9 +97,13 @@ export const api = {
   restoreCapture: (id: number) => invoke<Capture>("restore_capture", { id }),
   listRecentlyDeletedCaptures: () =>
     invoke<Capture[]>("list_recently_deleted_captures"),
+  deleteCapturePermanently: (id: number) =>
+    invoke<void>("delete_capture_permanently", { id }),
   restoreTemplate: (id: number) => invoke<Template>("restore_template", { id }),
   listRecentlyDeletedTemplates: () =>
     invoke<Template[]>("list_recently_deleted_templates"),
+  deleteTemplatePermanently: (id: number) =>
+    invoke<void>("delete_template_permanently", { id }),
   createSection: (name: string) => invoke<Section>("create_section", { name }),
   renameSection: (id: number, name: string) =>
     invoke<Section>("rename_section", { id, name }),
