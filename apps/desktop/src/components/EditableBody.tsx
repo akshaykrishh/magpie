@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Capture } from "@/lib/types";
 import { MarkdownBody } from "./MarkdownBody";
 
@@ -11,6 +11,23 @@ interface EditableBodyProps {
 
 export function EditableBody({ capture, editing, onSave, onCancel }: EditableBodyProps) {
   const [draft, setDraft] = useState(capture.body);
+
+  // `draft` otherwise only reflects whatever `capture.body` was at mount --
+  // fine for a short-lived editor, but this component can now sit mounted
+  // for a long time (the row it belongs to gets re-rendered, not remounted,
+  // by every unrelated refreshStream()/refreshNow() this task wired up --
+  // Mark Done, Merge, Move-to, Delete, etc. all refetch without touching
+  // this row's identity). Without this resync, opening the editor could
+  // silently start from a stale snapshot and save over a newer body that
+  // arrived from elsewhere in the meantime. Resyncing only on the
+  // false-to-true transition (not on every render) is deliberate -- it
+  // must NOT clobber in-progress keystrokes on every parent re-render while
+  // already editing.
+  useEffect(() => {
+    if (editing) setDraft(capture.body);
+    // Deliberately NOT depending on capture.body -- a body change that
+    // arrives while already editing must not clobber in-progress keystrokes.
+  }, [editing, capture.id]);
 
   if (!editing) {
     return <MarkdownBody text={capture.body} className="text-sm text-neutral-800 dark:text-neutral-200" />;

@@ -122,6 +122,17 @@ export function CaptureItem({
     setEditing(true);
   }
 
+  // Closing the modal must undo *both* halves of openEditWindow's stand-in,
+  // not just `expanded` -- the row's own inline editor is gated on
+  // `editing && !expanded` (see the render below), so leaving `editing` true
+  // after the modal closes would flip that expression straight back to
+  // true and drop the plain row into an inline-edit textarea the user never
+  // asked for by closing what looks like a preview panel.
+  function closeExpanded() {
+    setExpanded(false);
+    setEditing(false);
+  }
+
   function createAndAssignSection() {
     const name = window.prompt("New section name");
     if (name?.trim()) onCreateSection?.(targetIds(), name.trim());
@@ -141,8 +152,11 @@ export function CaptureItem({
   const isSessionDigest = capture.kind === "session_digest";
   // Editing a screenshot's body doesn't mean anything -- its visible content
   // is the image + OCR text (blob.ocr_text), not capture.body, which stays
-  // "" for these (see mightHaveBlob's comment above).
-  const editDisabled = isSessionDigest || isScreenshot || !onEdit;
+  // "" for these (see mightHaveBlob's comment above). Whether Edit appears
+  // in the menu AT ALL is a separate question (gated on `onEdit` being
+  // present at all, in buildContextMenuItems below) from whether it's
+  // *disabled* for this particular capture's kind/shape.
+  const editActionDisabled = isSessionDigest || isScreenshot;
 
   return (
     <div
@@ -215,7 +229,7 @@ export function CaptureItem({
       {expanded && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6"
-          onClick={() => setExpanded(false)}
+          onClick={closeExpanded}
         >
           <div
             className="flex max-h-[80vh] w-full max-w-xl flex-col gap-3 overflow-y-auto rounded-lg border
@@ -226,7 +240,7 @@ export function CaptureItem({
               <p className="text-xs text-neutral-400 dark:text-neutral-500">{timestamp}</p>
               <button
                 type="button"
-                onClick={() => setExpanded(false)}
+                onClick={closeExpanded}
                 className="rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
               >
                 <X size={16} />
@@ -275,52 +289,66 @@ export function CaptureItem({
       items.push({ label: "Remove from Now", onClick: () => onDemote(capture.id) });
     }
 
-    items.push(
-      {
-        label: "Copy",
-        onClick: () => (isScreenshot ? api.copyCaptureImage(capture.id) : api.copyCaptureText(capture.id)),
-      },
-      { label: `Copy as List${batchSuffix}`, onClick: () => api.copyCapturesAsChecklist(ids) },
-      { label: "Edit", onClick: () => setEditing(true), disabled: editDisabled },
-      { label: "Edit in New Window", onClick: () => openEditWindow(), disabled: editDisabled },
-      { label: "Expand", onClick: () => setExpanded(true) },
-      {
+    items.push({
+      label: "Copy",
+      onClick: () => (isScreenshot ? api.copyCaptureImage(capture.id) : api.copyCaptureText(capture.id)),
+    });
+    items.push({ label: `Copy as List${batchSuffix}`, onClick: () => api.copyCapturesAsChecklist(ids) });
+
+    // Same omission pattern as Mark Done/Reopen/Promote/Demote above: when a
+    // list (e.g. NowList/DockApp) doesn't wire a handler down at all, the
+    // corresponding action is simply absent rather than a permanently
+    // disabled dead entry -- that's what keeps those rows' menus at their
+    // clean, pre-Task-20 shape instead of a wall of grayed-out items.
+    if (onEdit) {
+      items.push({ label: "Edit", onClick: () => setEditing(true), disabled: editActionDisabled });
+      items.push({
+        label: "Edit in New Window",
+        onClick: () => openEditWindow(),
+        disabled: editActionDisabled,
+      });
+    }
+
+    items.push({ label: "Expand", onClick: () => setExpanded(true) });
+
+    if (onMerge) {
+      items.push({
         label: `Merge Notes${batchSuffix}`,
-        onClick: () => onMerge?.(ids),
+        onClick: () => onMerge(ids),
         // merge_captures errors below 2 sources (crates/magpie-core/src/merge.rs)
         // -- a lone target id is never a valid merge, batch or not.
-        disabled: !onMerge || ids.length < 2,
-      },
-      {
+        disabled: ids.length < 2,
+      });
+    }
+
+    if (onMoveProject) {
+      items.push({
         label: "Move to Project",
         submenu: [
-          { label: "Inbox", onClick: () => onMoveProject?.(ids, null), disabled: !onMoveProject },
-          ...projects.map((p) => ({
-            label: p.name,
-            onClick: () => onMoveProject?.(ids, p.id),
-            disabled: !onMoveProject,
-          })),
+          { label: "Inbox", onClick: () => onMoveProject(ids, null) },
+          ...projects.map((p) => ({ label: p.name, onClick: () => onMoveProject(ids, p.id) })),
         ],
-      },
-      {
+      });
+    }
+
+    if (onMoveSection) {
+      items.push({
         label: "Move to Section",
         submenu: [
-          { label: "None", onClick: () => onMoveSection?.(ids, null), disabled: !onMoveSection },
-          ...sections.map((s) => ({
-            label: s.name,
-            onClick: () => onMoveSection?.(ids, s.id),
-            disabled: !onMoveSection,
-          })),
+          { label: "None", onClick: () => onMoveSection(ids, null) },
+          ...sections.map((s) => ({ label: s.name, onClick: () => onMoveSection(ids, s.id) })),
           { label: "New section…", onClick: () => createAndAssignSection(), disabled: !onCreateSection },
         ],
-      },
-      {
+      });
+    }
+
+    if (onDelete) {
+      items.push({
         label: `Delete${batchSuffix}`,
-        onClick: () => onDelete?.(ids),
-        disabled: !onDelete,
+        onClick: () => onDelete(ids),
         destructive: true,
-      },
-    );
+      });
+    }
 
     return items;
   }
