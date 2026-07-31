@@ -1,10 +1,24 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 
-const msg = document.getElementById("msg")!;
+type ToastPayload =
+  | { kind: "plain"; message: string }
+  | { kind: "guess"; capture_id: number; project_id: number; project_name: string };
 
-listen<string>("toast:show", (event) => {
-  msg.textContent = event.payload;
+const msg = document.getElementById("msg")!;
+const dest = document.getElementById("dest")!;
+const destName = document.getElementById("dest-name")!;
+
+listen<ToastPayload>("toast:show", (event) => {
+  const payload = event.payload;
+  if (payload.kind === "plain") {
+    msg.textContent = payload.message;
+    dest.hidden = true;
+  } else {
+    msg.textContent = "Captured";
+    destName.textContent = payload.project_name;
+    dest.hidden = false;
+  }
 });
 
 // Sanity check for the M0 spike: prove this window never becomes the

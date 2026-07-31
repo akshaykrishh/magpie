@@ -5,6 +5,27 @@
 // Linux/Windows fall back to a plain window show/hide, not yet verified
 // non-activating (no Linux machine available to test on yet).
 
+use serde::Serialize;
+
+/// Everything the toast window can be told to show. `Plain` covers the
+/// existing flat-message cases (capture ok/failed, nothing to capture,
+/// secure input blocked). `Guess` is a proposed filing destination -- it is
+/// never written to the capture's `project_id` just by being shown (see
+/// docs/design.md "nothing is ever auto-filed"); committing it is a
+/// separate, explicit action (see capture_flow.rs's tap-to-confirm).
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ToastPayload {
+    Plain {
+        message: String,
+    },
+    Guess {
+        capture_id: i64,
+        project_id: i64,
+        project_name: String,
+    },
+}
+
 use tauri::{AppHandle, Manager};
 
 pub const TOAST_LABEL: &str = "toast";

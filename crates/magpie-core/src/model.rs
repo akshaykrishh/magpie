@@ -7,6 +7,22 @@ pub struct Project {
     pub remote_url: Option<String>,
     pub common_git_dir: Option<String>,
     pub created_at: String,
+    pub last_active_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Session {
+    pub id: String,
+    pub client: Option<String>,
+    pub pid: i64,
+    pub project_id: Option<i64>,
+    pub branch: Option<String>,
+    pub started_at: String,
+    pub last_active_at: Option<String>,
+    pub ended_at: Option<String>,
+    pub leased_count: i64,
+    pub completed_count: i64,
+    pub failed_count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

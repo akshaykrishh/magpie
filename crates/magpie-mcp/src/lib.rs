@@ -120,14 +120,33 @@ pub struct MagpieServer {
 
 #[tool_router]
 impl MagpieServer {
-    pub fn new(store: Arc<Store>, project: &DetectedProject, project_id: Option<i64>) -> Self {
-        Self {
+    pub fn new(
+        store: Arc<Store>,
+        project: &DetectedProject,
+        project_id: Option<i64>,
+    ) -> magpie_core::Result<Self> {
+        let session = uuid::Uuid::new_v4().to_string();
+        let pid = std::process::id() as i64;
+        let branch = project.branch.clone();
+        store.create_session(&session, pid, project_id, branch.as_deref())?;
+        Ok(Self {
             store,
-            session: uuid::Uuid::new_v4().to_string(),
-            pid: std::process::id() as i64,
+            session,
+            pid,
             project_id,
-            branch: project.branch.clone(),
+            branch,
             tool_router: Self::tool_router(),
+        })
+    }
+
+    /// Best-effort activity/client backfill for this session's row --
+    /// failures here are logged, never surfaced as a tool error, since
+    /// session tracking is observability, not correctness (leasing
+    /// correctness never depended on this -- see docs/design.md "MCP
+    /// contract").
+    fn touch_session(&self, client: &str) {
+        if let Err(e) = self.store.touch_session_active(&self.session, client) {
+            eprintln!("magpie: failed to update session activity: {e}");
         }
     }
 
@@ -171,6 +190,7 @@ impl MagpieServer {
         ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_name(&ctx);
+        self.touch_session(&client);
         let identity = self.identity(&client);
         let item = self
             .store
@@ -187,6 +207,7 @@ impl MagpieServer {
         ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_name(&ctx);
+        self.touch_session(&client);
         self.store
             .capture_complete(args.id, &self.identity(&client).session)
             .map_err(to_error)?;
@@ -203,6 +224,7 @@ impl MagpieServer {
         ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let client = self.client_name(&ctx);
+        self.touch_session(&client);
         self.store
             .capture_fail(args.id, &self.identity(&client).session, &args.reason)
             .map_err(to_error)?;
@@ -281,12 +303,13 @@ pub async fn serve_stdio(store: Arc<Store>) -> anyhow::Result<()> {
         ),
     };
 
-    let server = MagpieServer::new(store.clone(), &project, project_id);
+    let server = MagpieServer::new(store.clone(), &project, project_id)?;
     let session = server.session.clone();
 
     let running = server.serve(rmcp::transport::stdio()).await?;
     running.waiting().await?;
 
     store.release_leases_for_session(&session)?;
+    store.end_session(&session)?;
     Ok(())
 }
