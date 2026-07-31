@@ -31,6 +31,20 @@ const TAP_THRESHOLD: Duration = Duration::from_millis(250);
 pub fn on_capture_hotkey(app: &AppHandle) {
     let state = app.state::<AppState>();
 
+    // Unconditionally discard whatever guess was pending before this press,
+    // regardless of what this press goes on to do. Without this, an earlier
+    // successful capture's still-pending guess (its `Released` hasn't fired
+    // yet) would survive a *new* `Pressed` that fails to produce a capture
+    // (nothing to capture, Secure Input blocked, read/insert error) and
+    // could then get committed by that earlier press's eventual `Released`
+    // -- confirming a project assignment for a capture the user never just
+    // tapped to confirm. The success arm below sets a fresh pending guess
+    // right after this, so this is a no-op on the happy path.
+    *state
+        .pending_guess
+        .lock()
+        .expect("pending_guess mutex poisoned") = None;
+
     let text = match state.backend.read_capture_text() {
         Ok(Some(t)) => t,
         Ok(None) => {

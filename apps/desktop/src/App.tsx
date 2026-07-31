@@ -56,12 +56,20 @@ function App() {
       // AXIsProcessTrusted check to reflect a new grant).
       api.captureCapabilities().then(setCapabilities).catch(console.error);
     });
+    // Fires when a capture already in the stream changes in place -- e.g. a
+    // tap-to-confirm project assignment from the hotkey flow, or background
+    // OCR finishing on a screenshot. Either way the row's data is stale
+    // until the stream is refetched.
+    const unlistenCaptureUpdated = listen("capture:updated", () => {
+      refreshStream();
+    });
     // The pinned dock (a separate window) can promote/reorder/complete Now
     // items independently -- this is what keeps this window's copy in sync
     // with changes made over there, and vice versa (see handlers below).
     const unlistenNow = listen(NOW_CHANGED_EVENT, refreshNow);
     return () => {
       unlistenCapture.then((f) => f());
+      unlistenCaptureUpdated.then((f) => f());
       unlistenNow.then((f) => f());
     };
   }, [refreshStream, refreshNow]);
