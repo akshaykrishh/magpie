@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import type { Capture, Template } from "@/lib/types";
 
@@ -6,21 +6,50 @@ export function RecentlyDeletedView() {
   const [captures, setCaptures] = useState<Capture[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
 
+  // Guards against out-of-order responses: each refresh() bumps this and
+  // captures the new value locally, so a slower, earlier-fired request that
+  // resolves after a newer one can detect it's stale (the ref will have
+  // moved on) and discard its result instead of clobbering fresher state.
+  // Needed because refresh() can be in flight more than once at a time --
+  // e.g. two quick restores of different rows, or a double-clicked Restore
+  // button (there's no disabled/loading state on it) -- and nothing else
+  // sequences those calls relative to each other.
+  const refreshGeneration = useRef(0);
+
   function refresh() {
-    api.listRecentlyDeletedCaptures().then(setCaptures).catch(console.error);
-    api.listRecentlyDeletedTemplates().then(setTemplates).catch(console.error);
+    const generation = ++refreshGeneration.current;
+    api
+      .listRecentlyDeletedCaptures()
+      .then((result) => {
+        if (refreshGeneration.current === generation) setCaptures(result);
+      })
+      .catch(console.error);
+    api
+      .listRecentlyDeletedTemplates()
+      .then((result) => {
+        if (refreshGeneration.current === generation) setTemplates(result);
+      })
+      .catch(console.error);
   }
 
   useEffect(refresh, []);
 
   async function restoreCapture(id: number) {
-    await api.restoreCapture(id);
-    refresh();
+    try {
+      await api.restoreCapture(id);
+      refresh();
+    } catch (err) {
+      console.error(err);
+    }
   }
 
   async function restoreTemplate(id: number) {
-    await api.restoreTemplate(id);
-    refresh();
+    try {
+      await api.restoreTemplate(id);
+      refresh();
+    } catch (err) {
+      console.error(err);
+    }
   }
 
   if (captures.length === 0 && templates.length === 0) {
