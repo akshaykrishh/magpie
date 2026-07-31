@@ -154,6 +154,7 @@ export function NowList({
                 onReorder={onReorder}
                 onRename={onRenameSection}
                 onDelete={onDeleteSection}
+                cursorId={cursor.cursorId}
               />
             ))}
           </SortableContext>
@@ -167,7 +168,13 @@ export function NowList({
       >
         <SortableContext items={unsectioned.map((c) => c.id)} strategy={verticalListSortingStrategy}>
           {unsectioned.map((capture) => (
-            <SortableCaptureItem key={capture.id} capture={capture} onDone={onDone} onDemote={onDemote} />
+            <SortableCaptureItem
+              key={capture.id}
+              capture={capture}
+              onDone={onDone}
+              onDemote={onDemote}
+              isCursor={capture.id === cursor.cursorId}
+            />
           ))}
         </SortableContext>
       </DndContext>
@@ -188,6 +195,7 @@ function SortableSectionGroup({
   onReorder,
   onRename,
   onDelete,
+  cursorId,
 }: {
   section: Section;
   captures: Capture[];
@@ -196,6 +204,7 @@ function SortableSectionGroup({
   onReorder: (id: number, afterId: number | null) => void;
   onRename: (id: number, name: string) => void;
   onDelete: (id: number) => void;
+  cursorId: number | null;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: section.id,
@@ -232,6 +241,7 @@ function SortableSectionGroup({
                 capture={capture}
                 onDone={onDone}
                 onDemote={onDemote}
+                isCursor={capture.id === cursorId}
               />
             ))}
           </div>
@@ -245,10 +255,12 @@ function SortableCaptureItem({
   capture,
   onDone,
   onDemote,
+  isCursor,
 }: {
   capture: Capture;
   onDone: (id: number) => void;
   onDemote: (id: number) => void;
+  isCursor?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: capture.id,
@@ -265,6 +277,7 @@ function SortableCaptureItem({
         onDone={onDone}
         onDemote={onDemote}
         dragHandleProps={{ ...attributes, ...listeners }}
+        isCursor={isCursor}
       />
     </div>
   );

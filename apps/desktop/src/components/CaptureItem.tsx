@@ -54,6 +54,17 @@ interface CaptureItemProps {
       `e` single-key shortcut. Ignored for screenshots/session digests, the
       same captures the "Edit" menu item itself disables for. */
   editSignal?: number;
+  /** Whether this row is the list's current keyboard cursor (`useListCursor`'s
+      `cursorId === capture.id`) -- entirely separate from `selected`
+      (checkbox multi-select). The design's Gmail/Superhuman model keeps
+      these two concepts visually distinct: `selected` is "which rows a
+      batch action would act on," this is "where my keyboard focus
+      currently is." Both can be true on the same row at once, so the two
+      styles must be able to render simultaneously without one masking the
+      other (see the outline-vs-ring choice below). Defaults to false, so
+      omitting it entirely (e.g. any caller not wired to a cursor) never
+      shows a highlight. */
+  isCursor?: boolean;
 }
 
 export function CaptureItem({
@@ -77,6 +88,7 @@ export function CaptureItem({
   className,
   expandSignal,
   editSignal,
+  isCursor = false,
 }: CaptureItemProps) {
   const timestamp = formatDistanceToNow(new Date(capture.created_at), {
     addSuffix: true,
@@ -215,6 +227,14 @@ export function CaptureItem({
         "group flex items-start gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2.5",
         "dark:border-neutral-800 dark:bg-neutral-900",
         selected && "border-slate-teal ring-1 ring-slate-teal dark:border-slate-teal-light dark:ring-slate-teal-light",
+        // Deliberately a native `outline` (a separate box property from the
+        // `border`/`ring` `selected` uses above) in a neutral gray rather
+        // than the brand teal -- so a row that's both the keyboard cursor
+        // AND checked renders both cues at once instead of one clobbering
+        // the other, and a sighted user can tell "cursor" (gray outline)
+        // apart from "checked" (teal border+ring) at a glance rather than
+        // seeing one merged/ambiguous highlight.
+        isCursor && "outline outline-2 outline-offset-1 outline-neutral-400 dark:outline-neutral-500",
         className,
       )}
     >

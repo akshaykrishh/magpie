@@ -97,6 +97,7 @@ function SortableSectionGroup({
   onDeleteSection,
   rowActions,
   keyboardTrigger,
+  cursorId,
 }: {
   section: Section;
   captures: Capture[];
@@ -106,6 +107,7 @@ function SortableSectionGroup({
   onDeleteSection: (id: number) => void;
   rowActions: CaptureRowActions;
   keyboardTrigger: KeyboardRowTrigger | null;
+  cursorId: number | null;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: section.id,
@@ -143,6 +145,7 @@ function SortableSectionGroup({
             projects={rowActions.projects}
             sections={rowActions.sections}
             {...rowSignals(keyboardTrigger, capture.id)}
+            isCursor={capture.id === cursorId}
           />
         ))}
       </div>
@@ -705,6 +708,7 @@ function App() {
                         projects={rowActions.projects}
                         sections={rowActions.sections}
                         {...rowSignals(keyboardTrigger, capture.id)}
+                        isCursor={capture.id === streamCursor.cursorId}
                       />
                     ))}
                   </div>
@@ -740,6 +744,7 @@ function App() {
                                   onDeleteSection={handleDeleteSection}
                                   rowActions={rowActions}
                                   keyboardTrigger={keyboardTrigger}
+                                  cursorId={streamCursor.cursorId}
                                 />
                               ))}
                             </SortableContext>
@@ -768,6 +773,7 @@ function App() {
                             projects={rowActions.projects}
                             sections={rowActions.sections}
                             {...rowSignals(keyboardTrigger, capture.id)}
+                            isCursor={capture.id === streamCursor.cursorId}
                           />
                         ))}
                       </div>
