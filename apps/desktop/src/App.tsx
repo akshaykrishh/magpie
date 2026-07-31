@@ -282,11 +282,15 @@ function App() {
     emit(NOW_CHANGED_EVENT);
   }
 
+  // Delegates to handleMergeIds below rather than duplicating its body --
+  // before this fix, this toolbar-only path skipped handleMergeIds's
+  // refreshNow()/emit(NOW_CHANGED_EVENT), so merging captures via the
+  // toolbar could leave a stale Now sidebar (e.g. when a merged source was
+  // promoted) while the identical action via a row's context menu refreshed
+  // it correctly. Delegating guarantees the two entry points can't drift
+  // apart on this again.
   async function handleMerge() {
-    if (selected.size < 2) return;
-    await api.mergeCaptures(Array.from(selected));
-    setSelected(new Set());
-    refreshStream();
+    await handleMergeIds(Array.from(selected));
   }
 
   // Toolbar-only action: the row context menu's "Copy as List" calls
