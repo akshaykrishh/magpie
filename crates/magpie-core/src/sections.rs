@@ -102,6 +102,49 @@ impl Store {
             get_section_tx(conn, id)
         })
     }
+
+    /// Unassigns members (`section_id = NULL`) but never touches their own
+    /// `deleted_at` -- deleting an organizational header must never delete
+    /// content.
+    pub fn delete_section(&self, id: i64) -> Result<()> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE sections SET deleted_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+                params![now_iso(), id],
+            )?;
+            conn.execute(
+                "UPDATE captures SET section_id = NULL WHERE section_id = ?1",
+                params![id],
+            )?;
+            conn.execute(
+                "UPDATE templates SET section_id = NULL WHERE section_id = ?1",
+                params![id],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn restore_section(&self, id: i64) -> Result<Section> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE sections SET deleted_at = NULL WHERE id = ?1",
+                params![id],
+            )?;
+            get_section_tx(conn, id)
+        })
+    }
+
+    pub fn list_recently_deleted_sections(&self) -> Result<Vec<Section>> {
+        self.with_conn(|conn| {
+            let sql = format!(
+                "SELECT {SECTION_COLUMNS} FROM sections
+                 WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map([], section_from_row)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
 }
 
 fn get_section_tx(conn: &rusqlite::Connection, id: i64) -> Result<Section> {
@@ -191,5 +234,36 @@ mod tests {
         let a = store.create_section("A").unwrap();
         let err = store.reorder_section(a.id, Some(999)).unwrap_err();
         assert!(matches!(err, Error::SectionNotFound(999)));
+    }
+
+    #[test]
+    fn delete_section_unassigns_members_without_deleting_them() {
+        let store = crate::Store::open_in_memory().unwrap();
+        let s = store.create_section("Research").unwrap();
+        let c = store.capture("note", None).unwrap();
+        store.assign_capture_section(c.id, Some(s.id)).unwrap();
+
+        store.delete_section(s.id).unwrap();
+
+        let c_after = store.get_capture(c.id).unwrap();
+        assert_eq!(c_after.section_id, None);
+        assert_eq!(c_after.deleted_at, None); // member itself isn't deleted
+        assert!(store.list_sections().unwrap().is_empty());
+    }
+
+    #[test]
+    fn restore_section_brings_it_back_but_does_not_reassign_former_members() {
+        let store = crate::Store::open_in_memory().unwrap();
+        let s = store.create_section("Research").unwrap();
+        let c = store.capture("note", None).unwrap();
+        store.assign_capture_section(c.id, Some(s.id)).unwrap();
+        store.delete_section(s.id).unwrap();
+
+        let restored = store.restore_section(s.id).unwrap();
+        assert_eq!(restored.deleted_at, None);
+        assert_eq!(store.list_sections().unwrap().len(), 1);
+
+        let c_after = store.get_capture(c.id).unwrap();
+        assert_eq!(c_after.section_id, None); // membership was discarded, not preserved
     }
 }
