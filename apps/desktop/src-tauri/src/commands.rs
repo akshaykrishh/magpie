@@ -1,7 +1,7 @@
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use magpie_capture::Capabilities;
-use magpie_core::{AuditEntry, Blob, Capture, Project, Tag, Template};
+use magpie_core::{AuditEntry, Blob, Capture, Project, Session, Tag, Template};
 use serde::Deserialize;
 use tauri::State;
 
@@ -144,6 +144,11 @@ pub fn list_captures_by_tag(state: State<AppState>, name: String) -> CmdResult<V
 #[tauri::command]
 pub fn list_projects(state: State<AppState>) -> CmdResult<Vec<Project>> {
     map_err(state.store.list_projects())
+}
+
+#[tauri::command]
+pub fn list_sessions(state: State<AppState>, project_id: Option<i64>) -> CmdResult<Vec<Session>> {
+    map_err(state.store.list_sessions(project_id))
 }
 
 #[tauri::command]

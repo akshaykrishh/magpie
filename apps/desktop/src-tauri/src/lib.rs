@@ -86,6 +86,7 @@ pub fn run() {
             commands::get_blob_image_data_url,
             commands::get_template_variables,
             commands::instantiate_template_with_values,
+            commands::list_sessions,
         ])
         .on_window_event(|window, event| {
             if matches!(window.label(), "main" | "dock") {
