@@ -312,6 +312,15 @@ impl Store {
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
     }
+
+    pub fn purge_expired_captures(&self, cutoff: &str) -> Result<usize> {
+        self.with_conn(|conn| {
+            Ok(conn.execute(
+                "DELETE FROM captures WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+                params![cutoff],
+            )?)
+        })
+    }
 }
 
 pub(crate) fn get_capture_tx(conn: &rusqlite::Connection, id: i64) -> Result<Capture> {
@@ -625,5 +634,31 @@ mod tests {
         let deleted = store.list_recently_deleted_captures().unwrap();
         assert_eq!(deleted.len(), 1);
         assert_eq!(deleted[0].id, merged.id);
+    }
+
+    #[test]
+    fn purge_expired_captures_only_removes_rows_past_the_cutoff() {
+        let store = Store::open_in_memory().unwrap();
+        let old = store.capture("old", None).unwrap();
+        let recent = store.capture("recent", None).unwrap();
+        store.soft_delete_capture(old.id).unwrap();
+        store.soft_delete_capture(recent.id).unwrap();
+
+        // Force `old`'s deleted_at far into the past directly, since both
+        // were just soft-deleted "now" in this test.
+        store
+            .with_conn(|conn| {
+                conn.execute(
+                    "UPDATE captures SET deleted_at = '2000-01-01T00:00:00Z' WHERE id = ?1",
+                    rusqlite::params![old.id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        let purged = store.purge_expired_captures("2020-01-01T00:00:00Z").unwrap();
+        assert_eq!(purged, 1);
+        assert!(store.get_capture(old.id).is_err());
+        assert!(store.get_capture(recent.id).is_ok());
     }
 }

@@ -16,6 +16,14 @@ pub fn now_iso() -> String {
         .expect("RFC3339 formatting of a valid OffsetDateTime cannot fail")
 }
 
+/// The RFC3339 cutoff for "older than `days` days ago" -- rows with
+/// `deleted_at` before this are eligible for the purge sweep's hard delete.
+pub fn purge_cutoff(days: i64) -> String {
+    (OffsetDateTime::now_utc() - time::Duration::days(days))
+        .format(&Rfc3339)
+        .expect("RFC3339 formatting of a valid OffsetDateTime cannot fail")
+}
+
 const MIGRATIONS: &[(&str, &str)] = &[
     ("0001_init", include_str!("../migrations/0001_init.sql")),
     (

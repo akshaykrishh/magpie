@@ -174,6 +174,15 @@ impl Store {
             get_template_tx(conn, id)
         })
     }
+
+    pub fn purge_expired_templates(&self, cutoff: &str) -> Result<usize> {
+        self.with_conn(|conn| {
+            Ok(conn.execute(
+                "DELETE FROM templates WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+                params![cutoff],
+            )?)
+        })
+    }
 }
 
 fn get_template_tx(conn: &rusqlite::Connection, id: i64) -> Result<Template> {

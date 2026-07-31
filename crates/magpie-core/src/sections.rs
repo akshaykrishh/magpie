@@ -145,6 +145,28 @@ impl Store {
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
     }
+
+    pub fn purge_expired_sections(&self, cutoff: &str) -> Result<usize> {
+        self.with_conn(|conn| {
+            Ok(conn.execute(
+                "DELETE FROM sections WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+                params![cutoff],
+            )?)
+        })
+    }
+
+    /// The single entry point the desktop app's purge sweep calls -- see
+    /// docs/superpowers/specs/2026-07-31-capture-list-v2-design.md's
+    /// "Deletion" section for why this runs both at startup and on a
+    /// recurring timer, unlike the dead-pid lease sweep.
+    pub fn purge_expired(&self, days: i64) -> Result<(usize, usize, usize)> {
+        let cutoff = crate::db::purge_cutoff(days);
+        Ok((
+            self.purge_expired_captures(&cutoff)?,
+            self.purge_expired_templates(&cutoff)?,
+            self.purge_expired_sections(&cutoff)?,
+        ))
+    }
 }
 
 fn get_section_tx(conn: &rusqlite::Connection, id: i64) -> Result<Section> {
