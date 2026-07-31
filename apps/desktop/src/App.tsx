@@ -7,6 +7,7 @@ import { Logo, Wordmark } from "./components/Logo";
 import { MergeToolbar } from "./components/MergeToolbar";
 import { NowList } from "./components/NowList";
 import { PermissionBanner } from "./components/PermissionBanner";
+import { RecentlyDeletedView } from "./components/RecentlyDeletedView";
 import { SearchBar } from "./components/SearchBar";
 import { TemplatesPanel } from "./components/TemplatesPanel";
 import { UndoToast } from "./components/UndoToast";
@@ -19,11 +20,12 @@ import { cn } from "./lib/utils";
 // friction a few times is the upgrade worth interrupting them for.
 const CAPTURES_BEFORE_UPGRADE_OFFER = 3;
 
-type View = "captures" | "templates" | "activity";
+type View = "captures" | "templates" | "activity" | "recently_deleted";
 const VIEWS: { id: View; label: string }[] = [
   { id: "captures", label: "Captures" },
   { id: "templates", label: "Templates" },
   { id: "activity", label: "Activity" },
+  { id: "recently_deleted", label: "Recently Deleted" },
 ];
 
 function App() {
@@ -278,6 +280,8 @@ function App() {
           )}
 
           {view === "activity" && <AuditView />}
+
+          {view === "recently_deleted" && <RecentlyDeletedView />}
         </section>
       </div>
 
