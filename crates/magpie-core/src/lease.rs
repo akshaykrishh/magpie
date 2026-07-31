@@ -71,6 +71,7 @@ impl Store {
                 ],
             )?;
             record_audit_tx(&tx, &identity.client, "queue_take", Some(candidate.id))?;
+            crate::sessions::bump_session_leased_tx(&tx, &identity.session)?;
 
             let leased = get_capture_tx(&tx, candidate.id)?;
             tx.commit()?;
@@ -108,16 +109,20 @@ impl Store {
     /// lease -- an agent can't complete work it never took.
     pub fn capture_complete(&self, id: i64, session: &str) -> Result<Capture> {
         self.with_conn(|conn| {
-            let client = require_lease_tx(conn, id, session)?;
-            conn.execute(
+            let tx = conn.unchecked_transaction()?;
+            let client = require_lease_tx(&tx, id, session)?;
+            tx.execute(
                 "UPDATE captures
                  SET done_at = ?1, lease_session = NULL, lease_client = NULL,
                      lease_pid = NULL, lease_at = NULL
                  WHERE id = ?2",
                 params![now_iso(), id],
             )?;
-            record_audit_tx(conn, &client, "capture_done", Some(id))?;
-            get_capture_tx(conn, id)
+            record_audit_tx(&tx, &client, "capture_done", Some(id))?;
+            crate::sessions::bump_session_completed_tx(&tx, session)?;
+            let capture = get_capture_tx(&tx, id)?;
+            tx.commit()?;
+            Ok(capture)
         })
     }
 
@@ -128,16 +133,20 @@ impl Store {
     /// immediately eligible for `queue_take` again.
     pub fn capture_fail(&self, id: i64, session: &str, reason: &str) -> Result<Capture> {
         self.with_conn(|conn| {
-            let client = require_lease_tx(conn, id, session)?;
-            conn.execute(
+            let tx = conn.unchecked_transaction()?;
+            let client = require_lease_tx(&tx, id, session)?;
+            tx.execute(
                 "UPDATE captures
                  SET failed_reason = ?1, lease_session = NULL, lease_client = NULL,
                      lease_pid = NULL, lease_at = NULL
                  WHERE id = ?2",
                 params![reason, id],
             )?;
-            record_audit_tx(conn, &client, "capture_fail", Some(id))?;
-            get_capture_tx(conn, id)
+            record_audit_tx(&tx, &client, "capture_fail", Some(id))?;
+            crate::sessions::bump_session_failed_tx(&tx, session)?;
+            let capture = get_capture_tx(&tx, id)?;
+            tx.commit()?;
+            Ok(capture)
         })
     }
 
@@ -406,5 +415,81 @@ mod tests {
         store.release_lease(leases[0].0).unwrap();
         let after = store.get_capture(a.id).unwrap();
         assert!(after.lease_session.is_none());
+    }
+
+    #[test]
+    fn queue_take_bumps_the_taking_sessions_leased_count() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.promote(c.id).unwrap();
+
+        let identity = LeaseIdentity {
+            session: "sess-1".to_string(),
+            client: "claude-code".to_string(),
+            pid: 111,
+        };
+        store.queue_take(None, None, &identity).unwrap();
+
+        let session = store.get_session("sess-1").unwrap();
+        assert_eq!(session.leased_count, 1);
+        assert!(session.last_active_at.is_some());
+    }
+
+    #[test]
+    fn queue_take_does_not_bump_leased_count_when_nothing_is_queued() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+
+        let identity = LeaseIdentity {
+            session: "sess-1".to_string(),
+            client: "claude-code".to_string(),
+            pid: 111,
+        };
+        let result = store.queue_take(None, None, &identity).unwrap();
+        assert!(result.is_none());
+
+        let session = store.get_session("sess-1").unwrap();
+        assert_eq!(session.leased_count, 0);
+    }
+
+    #[test]
+    fn capture_complete_bumps_the_completing_sessions_completed_count() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.promote(c.id).unwrap();
+        let identity = LeaseIdentity {
+            session: "sess-1".to_string(),
+            client: "claude-code".to_string(),
+            pid: 111,
+        };
+        store.queue_take(None, None, &identity).unwrap();
+
+        store.capture_complete(c.id, "sess-1").unwrap();
+
+        let session = store.get_session("sess-1").unwrap();
+        assert_eq!(session.completed_count, 1);
+    }
+
+    #[test]
+    fn capture_fail_bumps_the_failing_sessions_failed_count() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.promote(c.id).unwrap();
+        let identity = LeaseIdentity {
+            session: "sess-1".to_string(),
+            client: "claude-code".to_string(),
+            pid: 111,
+        };
+        store.queue_take(None, None, &identity).unwrap();
+
+        store
+            .capture_fail(c.id, "sess-1", "couldn't find the file")
+            .unwrap();
+
+        let session = store.get_session("sess-1").unwrap();
+        assert_eq!(session.failed_count, 1);
     }
 }
