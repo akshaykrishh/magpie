@@ -236,6 +236,28 @@ impl Store {
             get_capture_tx(conn, id)
         })
     }
+
+    pub fn assign_capture_section(&self, id: i64, section_id: Option<i64>) -> Result<Capture> {
+        self.with_conn(|conn| {
+            if let Some(section_id) = section_id {
+                conn.query_row(
+                    "SELECT id FROM sections WHERE id = ?1 AND deleted_at IS NULL",
+                    params![section_id],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .ok_or(Error::SectionNotFound(section_id))?;
+            }
+            conn.execute(
+                "UPDATE captures SET section_id = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+                params![section_id, id],
+            )?;
+            let sql = format!("SELECT {CAPTURE_COLUMNS} FROM captures WHERE id = ?1");
+            conn.query_row(&sql, params![id], capture_from_row)
+                .optional()?
+                .ok_or(Error::CaptureNotFound(id))
+        })
+    }
 }
 
 pub(crate) fn get_capture_tx(conn: &rusqlite::Connection, id: i64) -> Result<Capture> {
@@ -443,5 +465,31 @@ mod tests {
         let c = store.capture("hello", None).unwrap();
         assert_eq!(c.section_id, None);
         assert_eq!(c.deleted_at, None);
+    }
+
+    #[test]
+    fn assign_capture_section_round_trips_and_clears_previous() {
+        let store = Store::open_in_memory().unwrap();
+        let c = store.capture("note", None).unwrap();
+        let a = store.create_section("A").unwrap();
+        let b = store.create_section("B").unwrap();
+
+        let assigned = store.assign_capture_section(c.id, Some(a.id)).unwrap();
+        assert_eq!(assigned.section_id, Some(a.id));
+
+        // Single membership: assigning to B replaces A, doesn't add to it.
+        let reassigned = store.assign_capture_section(c.id, Some(b.id)).unwrap();
+        assert_eq!(reassigned.section_id, Some(b.id));
+
+        let cleared = store.assign_capture_section(c.id, None).unwrap();
+        assert_eq!(cleared.section_id, None);
+    }
+
+    #[test]
+    fn assign_capture_section_rejects_a_nonexistent_section() {
+        let store = Store::open_in_memory().unwrap();
+        let c = store.capture("note", None).unwrap();
+        let err = store.assign_capture_section(c.id, Some(999)).unwrap_err();
+        assert!(matches!(err, Error::SectionNotFound(999)));
     }
 }

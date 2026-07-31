@@ -121,6 +121,25 @@ impl Store {
             .map(|&project_id| self.instantiate_template(template_id, project_id))
             .collect()
     }
+
+    pub fn assign_template_section(&self, id: i64, section_id: Option<i64>) -> Result<Template> {
+        self.with_conn(|conn| {
+            if let Some(section_id) = section_id {
+                conn.query_row(
+                    "SELECT id FROM sections WHERE id = ?1 AND deleted_at IS NULL",
+                    params![section_id],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .ok_or(Error::SectionNotFound(section_id))?;
+            }
+            conn.execute(
+                "UPDATE templates SET section_id = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+                params![section_id, id],
+            )?;
+            get_template_tx(conn, id)
+        })
+    }
 }
 
 fn get_template_tx(conn: &rusqlite::Connection, id: i64) -> Result<Template> {
@@ -255,5 +274,14 @@ mod tests {
         let t = store.create_template("title", "body").unwrap();
         assert_eq!(t.section_id, None);
         assert_eq!(t.deleted_at, None);
+    }
+
+    #[test]
+    fn assign_template_section_round_trips() {
+        let store = Store::open_in_memory().unwrap();
+        let t = store.create_template("title", "body").unwrap();
+        let s = store.create_section("Prompts").unwrap();
+        let assigned = store.assign_template_section(t.id, Some(s.id)).unwrap();
+        assert_eq!(assigned.section_id, Some(s.id));
     }
 }
