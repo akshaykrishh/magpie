@@ -13,6 +13,7 @@ mod packs;
 mod placeholders;
 mod projects;
 mod search;
+mod sections;
 mod sessions;
 mod sources;
 mod tags;

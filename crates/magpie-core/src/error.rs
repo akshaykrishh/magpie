@@ -23,6 +23,9 @@ pub enum Error {
     #[error("template {0} not found")]
     TemplateNotFound(i64),
 
+    #[error("section {0} not found")]
+    SectionNotFound(i64),
+
     #[error("capture {0} is not currently leased")]
     NotLeased(i64),
 
