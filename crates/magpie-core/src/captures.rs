@@ -276,10 +276,7 @@ impl Store {
                 "UPDATE captures SET deleted_at = ?1 WHERE merged_into = ?2 AND deleted_at IS NULL",
                 params![now, id],
             )?;
-            let sql = format!("SELECT {CAPTURE_COLUMNS} FROM captures WHERE id = ?1");
-            conn.query_row(&sql, params![id], capture_from_row)
-                .optional()?
-                .ok_or(Error::CaptureNotFound(id))
+            get_capture_tx(conn, id)
         })
     }
 
@@ -293,18 +290,22 @@ impl Store {
                 "UPDATE captures SET deleted_at = NULL WHERE merged_into = ?1",
                 params![id],
             )?;
-            let sql = format!("SELECT {CAPTURE_COLUMNS} FROM captures WHERE id = ?1");
-            conn.query_row(&sql, params![id], capture_from_row)
-                .optional()?
-                .ok_or(Error::CaptureNotFound(id))
+            get_capture_tx(conn, id)
         })
     }
 
+    /// `merged_into IS NULL` excludes merge-absorbed sources -- when a
+    /// merged-result capture is soft-deleted, the cascade also marks its
+    /// absorbed sources deleted, but they must stay invisible here just as
+    /// they're invisible everywhere else (stream, search, export); otherwise
+    /// this view would show both the merged result and its now-redundant
+    /// originals as separate "deleted" entries.
     pub fn list_recently_deleted_captures(&self) -> Result<Vec<Capture>> {
         self.with_conn(|conn| {
             let sql = format!(
                 "SELECT {CAPTURE_COLUMNS} FROM captures
-                 WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"
+                 WHERE deleted_at IS NOT NULL AND merged_into IS NULL
+                 ORDER BY deleted_at DESC"
             );
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map([], capture_from_row)?;
@@ -580,13 +581,18 @@ mod tests {
         // Absorbed sources aren't independently listed even when active
         // (existing merge behavior), but their own deleted_at should now
         // be set too, so a direct restore of the merge result also
-        // restores their state consistently.
+        // restores their state consistently. Check both sources, not just
+        // one, since the cascade UPDATE could in principle miss one of them.
         let a_row = store.get_capture(a.id).unwrap();
+        let b_row = store.get_capture(b.id).unwrap();
         assert!(a_row.deleted_at.is_some());
+        assert!(b_row.deleted_at.is_some());
 
         store.restore_capture(merged.id).unwrap();
         let a_row = store.get_capture(a.id).unwrap();
+        let b_row = store.get_capture(b.id).unwrap();
         assert_eq!(a_row.deleted_at, None);
+        assert_eq!(b_row.deleted_at, None);
     }
 
     #[test]
@@ -600,5 +606,24 @@ mod tests {
         let deleted = store.list_recently_deleted_captures().unwrap();
         assert_eq!(deleted.len(), 2);
         assert_eq!(deleted[0].id, b.id); // most-recently-deleted first
+    }
+
+    #[test]
+    fn list_recently_deleted_captures_excludes_merge_absorbed_sources() {
+        let store = Store::open_in_memory().unwrap();
+        let a = store.capture("part one", None).unwrap();
+        let b = store.capture("part two", None).unwrap();
+        let merged = store.merge(&[a.id, b.id]).unwrap();
+
+        // Deleting the merged result cascades deleted_at to its absorbed
+        // sources too (see soft_delete_capture), but they must not surface
+        // here as independent entries -- same "merged-away captures are
+        // never independently visible" rule as the stream, search, and
+        // export views.
+        store.soft_delete_capture(merged.id).unwrap();
+
+        let deleted = store.list_recently_deleted_captures().unwrap();
+        assert_eq!(deleted.len(), 1);
+        assert_eq!(deleted[0].id, merged.id);
     }
 }
