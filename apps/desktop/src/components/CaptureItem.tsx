@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { formatDistanceToNow } from "date-fns";
-import { GripVertical, X } from "lucide-react";
+import { GripVertical } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { CAPTURE_UPDATED_EVENT } from "@/lib/events";
@@ -8,6 +8,7 @@ import type { Blob as CaptureBlob, Capture, Project, Section } from "@/lib/types
 import { cn } from "@/lib/utils";
 import { ContextMenu, ContextMenuTrigger, type ContextMenuItem } from "./ContextMenu";
 import { EditableBody } from "./EditableBody";
+import { ExpandedCaptureModal } from "./ExpandedCaptureModal";
 import { MarkdownBody } from "./MarkdownBody";
 
 interface CaptureItemProps {
@@ -227,47 +228,15 @@ export function CaptureItem({
       </div>
 
       {expanded && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6"
-          onClick={closeExpanded}
-        >
-          <div
-            className="flex max-h-[80vh] w-full max-w-xl flex-col gap-3 overflow-y-auto rounded-lg border
-                       border-neutral-200 bg-white p-4 shadow-xl dark:border-neutral-800 dark:bg-neutral-900"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <p className="text-xs text-neutral-400 dark:text-neutral-500">{timestamp}</p>
-              <button
-                type="button"
-                onClick={closeExpanded}
-                className="rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            {imageUrl && (
-              <img
-                src={imageUrl}
-                alt="Screenshot capture"
-                className="max-h-96 w-fit max-w-full rounded-md border border-neutral-200 object-contain dark:border-neutral-800"
-              />
-            )}
-            {blob ? (
-              <MarkdownBody
-                text={blob.ocr_text ?? "Reading text…"}
-                className="text-sm text-neutral-500 dark:text-neutral-400"
-              />
-            ) : (
-              <EditableBody
-                capture={capture}
-                editing={editing}
-                onSave={handleSaveEdit}
-                onCancel={() => setEditing(false)}
-              />
-            )}
-          </div>
-        </div>
+        <ExpandedCaptureModal
+          capture={capture}
+          blob={blob}
+          imageUrl={imageUrl}
+          timestamp={timestamp}
+          startEditing={editing}
+          onClose={closeExpanded}
+          onSave={handleSaveEdit}
+        />
       )}
     </div>
   );
