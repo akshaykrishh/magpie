@@ -3,7 +3,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::state::AppState;
-use crate::toast::{hide_toast, show_toast};
+use crate::toast::{hide_toast, show_toast, ToastPayload};
 
 const TOAST_VISIBLE_MS: u64 = 1800;
 
@@ -31,12 +31,12 @@ pub fn on_capture_hotkey(app: &AppHandle) {
             } else {
                 "Nothing to capture"
             };
-            fire_toast(app, message);
+            fire_plain_toast(app, message);
             return;
         }
         Err(e) => {
             eprintln!("magpie: capture read failed: {e}");
-            fire_toast(app, "Capture failed");
+            fire_plain_toast(app, "Capture failed");
             return;
         }
     };
@@ -54,13 +54,14 @@ pub fn on_capture_hotkey(app: &AppHandle) {
         });
 
     match state.store.capture(&text, source) {
-        Ok(_capture) => {
+        Ok(capture) => {
             let _ = app.emit("capture:added", ());
-            fire_toast(app, "Captured");
+            let payload = guess_toast_payload(&state.store, capture.id);
+            fire_toast(app, payload);
         }
         Err(e) => {
             eprintln!("magpie: capture insert failed: {e}");
-            fire_toast(app, "Capture failed");
+            fire_plain_toast(app, "Capture failed");
         }
     }
 }
@@ -78,7 +79,7 @@ pub fn on_screenshot_hotkey(app: &AppHandle) {
 
     let Some(dest_dir) = magpie_core::default_blobs_dir() else {
         eprintln!("magpie: could not determine a blobs directory for this platform");
-        fire_toast(app, "Screenshot capture failed");
+        fire_plain_toast(app, "Screenshot capture failed");
         return;
     };
 
@@ -90,7 +91,7 @@ pub fn on_screenshot_hotkey(app: &AppHandle) {
         Ok(None) => return,
         Err(e) => {
             eprintln!("magpie: screenshot capture failed: {e}");
-            fire_toast(app, "Screenshot capture failed");
+            fire_plain_toast(app, "Screenshot capture failed");
             return;
         }
     };
@@ -116,12 +117,12 @@ pub fn on_screenshot_hotkey(app: &AppHandle) {
     ) {
         Ok(capture) => {
             let _ = app.emit("capture:added", ());
-            fire_toast(app, "Captured");
+            fire_plain_toast(app, "Captured");
             capture.id
         }
         Err(e) => {
             eprintln!("magpie: screenshot capture insert failed: {e}");
-            fire_toast(app, "Screenshot capture failed");
+            fire_plain_toast(app, "Screenshot capture failed");
             return;
         }
     };
@@ -157,8 +158,8 @@ pub fn on_screenshot_hotkey(app: &AppHandle) {
     });
 }
 
-fn fire_toast(app: &AppHandle, message: &str) {
-    let _ = app.emit_to("toast", "toast:show", message);
+fn fire_toast(app: &AppHandle, payload: ToastPayload) {
+    let _ = app.emit_to("toast", "toast:show", payload);
     show_toast(app);
 
     // AppKit window/panel calls must happen on the main thread -- see the
@@ -171,4 +172,83 @@ fn fire_toast(app: &AppHandle, message: &str) {
             hide_toast(&for_main_thread);
         });
     });
+}
+
+fn fire_plain_toast(app: &AppHandle, message: &str) {
+    fire_toast(
+        app,
+        ToastPayload::Plain {
+            message: message.to_string(),
+        },
+    );
+}
+
+/// The desktop app's own guess at where a capture belongs: the single most
+/// recently active project, if any exist yet. This is deliberately a weak,
+/// visible-as-a-guess signal (see ToastPayload::Guess's doc comment) --
+/// unlike MCP's `detect()` (crates/magpie-mcp/src/project.rs), which is
+/// certain because it reads the actual git remote of the session's cwd,
+/// this has no comparable certainty available: an ambient hotkey/screenshot
+/// capture could have come from any app.
+fn guess_toast_payload(store: &magpie_core::Store, capture_id: i64) -> ToastPayload {
+    match store.list_projects_by_recency(1) {
+        Ok(projects) => match projects.into_iter().next() {
+            Some(p) => ToastPayload::Guess {
+                capture_id,
+                project_id: p.id,
+                project_name: p.name,
+            },
+            None => ToastPayload::Plain {
+                message: "Captured".to_string(),
+            },
+        },
+        Err(e) => {
+            eprintln!("magpie: project recency lookup failed: {e}");
+            ToastPayload::Plain {
+                message: "Captured".to_string(),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guess_falls_back_to_plain_when_no_projects_exist() {
+        let store = magpie_core::Store::open_in_memory().unwrap();
+        let capture = store.capture("something", None).unwrap();
+
+        let payload = guess_toast_payload(&store, capture.id);
+
+        assert!(matches!(payload, ToastPayload::Plain { .. }));
+    }
+
+    #[test]
+    fn guess_names_the_most_recently_active_project() {
+        let store = magpie_core::Store::open_in_memory().unwrap();
+        store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        let b = store
+            .get_or_create_project("b", Some("git@github.com:x/b.git"), None)
+            .unwrap();
+        let capture = store.capture("something", None).unwrap();
+
+        let payload = guess_toast_payload(&store, capture.id);
+
+        match payload {
+            ToastPayload::Guess {
+                capture_id,
+                project_id,
+                project_name,
+            } => {
+                assert_eq!(capture_id, capture.id);
+                assert_eq!(project_id, b.id);
+                assert_eq!(project_name, "b");
+            }
+            other => panic!("expected a guess, got {other:?}"),
+        }
+    }
 }
