@@ -162,6 +162,24 @@ impl Store {
         })
     }
 
+    /// Edit a capture's body in place. Rejects session digests -- they're
+    /// system-generated summaries, not user-authored content (mirrors the
+    /// `promote` guard above). The plain `UPDATE ... SET body` fires the
+    /// `captures_fts_au` trigger, keeping full-text search in sync.
+    pub fn update_capture_body(&self, id: i64, body: &str) -> Result<Capture> {
+        self.with_conn(|conn| {
+            let capture = get_capture_tx(conn, id)?;
+            if capture.is_session_digest() {
+                return Err(Error::CannotEditDigest(id));
+            }
+            conn.execute(
+                "UPDATE captures SET body = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+                params![body, id],
+            )?;
+            get_capture_tx(conn, id)
+        })
+    }
+
     /// Remove from Now back into the plain stream.
     pub fn demote(&self, id: i64) -> Result<Capture> {
         self.with_conn(|conn| {
@@ -514,6 +532,33 @@ mod tests {
 
         let err = store.promote(digest.id).unwrap_err();
         assert!(matches!(err, Error::CannotPromoteDigest(id) if id == digest.id));
+    }
+
+    #[test]
+    fn update_capture_body_changes_the_body_and_stays_searchable() {
+        let store = Store::open_in_memory().unwrap();
+        let c = store.capture("original", None).unwrap();
+        let updated = store.update_capture_body(c.id, "edited text").unwrap();
+        assert_eq!(updated.body, "edited text");
+        let results = store.search("edited", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(store.search("original", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn update_capture_body_rejects_a_session_digest() {
+        // Mirrors promote_rejects_a_session_digest's setup exactly: end_session
+        // returns (), so a digest is located by scanning the stream afterward,
+        // not by capturing an id from end_session's return value.
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        store.end_session("sess-1").unwrap();
+
+        let stream = store.list_stream(None, 10, 0).unwrap();
+        let digest = stream.iter().find(|c| c.is_session_digest()).unwrap();
+
+        let err = store.update_capture_body(digest.id, "edited").unwrap_err();
+        assert!(matches!(err, Error::CannotEditDigest(id) if id == digest.id));
     }
 
     #[test]

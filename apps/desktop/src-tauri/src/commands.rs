@@ -75,6 +75,11 @@ pub fn demote_capture(state: State<AppState>, id: i64) -> CmdResult<Capture> {
 }
 
 #[tauri::command]
+pub fn update_capture_body(state: State<AppState>, id: i64, body: String) -> CmdResult<Capture> {
+    map_err(state.store.update_capture_body(id, &body))
+}
+
+#[tauri::command]
 pub fn reorder_capture(
     state: State<AppState>,
     id: i64,

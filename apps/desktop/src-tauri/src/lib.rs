@@ -60,6 +60,7 @@ pub fn run() {
             commands::add_typed_capture,
             commands::promote_capture,
             commands::demote_capture,
+            commands::update_capture_body,
             commands::reorder_capture,
             commands::mark_capture_done,
             commands::reopen_capture,

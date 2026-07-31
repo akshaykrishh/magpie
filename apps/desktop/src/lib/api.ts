@@ -25,6 +25,9 @@ export const api = {
   promoteCapture: (id: number) => invoke<Capture>("promote_capture", { id }),
   demoteCapture: (id: number) => invoke<Capture>("demote_capture", { id }),
 
+  updateCaptureBody: (id: number, body: string) =>
+    invoke<Capture>("update_capture_body", { id, body }),
+
   reorderCapture: (id: number, afterId: number | null) =>
     invoke<Capture>("reorder_capture", { id, afterId }),
 

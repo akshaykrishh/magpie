@@ -11,6 +11,9 @@ pub enum Error {
     #[error("capture {0} is a session digest and cannot be promoted")]
     CannotPromoteDigest(i64),
 
+    #[error("capture {0} is a session digest and cannot be edited")]
+    CannotEditDigest(i64),
+
     #[error("project {0} not found")]
     ProjectNotFound(i64),
 
