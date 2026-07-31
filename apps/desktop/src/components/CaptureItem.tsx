@@ -41,6 +41,19 @@ interface CaptureItemProps {
   /** Drag handle + listeners, supplied by a sortable wrapper in the Now list. */
   dragHandleProps?: React.HTMLAttributes<HTMLButtonElement>;
   className?: string;
+  /** Task 24's Enter-key list shortcut: this row's `expanded` state has no
+      external setter (the row's own "Expand" menu item just calls
+      `setExpanded(true)` directly) -- bumping this to any new value (it
+      need not be sequential, just different from the previous render) opens
+      the same Expand modal, from outside the component, exactly as if that
+      menu item had been clicked. `undefined` (the default) never triggers
+      it, including on mount. */
+  expandSignal?: number;
+  /** Same mechanism as `expandSignal`, but for the row's own "Edit" item
+      (`setEditing(true)`, the inline editor -- no modal), used by Task 24's
+      `e` single-key shortcut. Ignored for screenshots/session digests, the
+      same captures the "Edit" menu item itself disables for. */
+  editSignal?: number;
 }
 
 export function CaptureItem({
@@ -62,6 +75,8 @@ export function CaptureItem({
   sections = [],
   dragHandleProps,
   className,
+  expandSignal,
+  editSignal,
 }: CaptureItemProps) {
   const timestamp = formatDistanceToNow(new Date(capture.created_at), {
     addSuffix: true,
@@ -158,6 +173,20 @@ export function CaptureItem({
   // present at all, in buildContextMenuItems below) from whether it's
   // *disabled* for this particular capture's kind/shape.
   const editActionDisabled = isSessionDigest || isScreenshot;
+
+  // See expandSignal/editSignal's doc comments above -- each effect only
+  // fires when its own signal changes to a defined value, mirroring exactly
+  // what the corresponding context-menu item's onClick already does.
+  useEffect(() => {
+    if (expandSignal !== undefined) setExpanded(true);
+  }, [expandSignal]);
+
+  useEffect(() => {
+    // Same two gates the "Edit" menu item itself applies: no handler wired
+    // at all (e.g. this row has no onEdit, so the menu wouldn't even show
+    // the item), or this capture's kind/shape disables it.
+    if (editSignal !== undefined && !editActionDisabled && onEdit) setEditing(true);
+  }, [editSignal, editActionDisabled, onEdit]);
 
   return (
     <div

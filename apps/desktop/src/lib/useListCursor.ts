@@ -21,11 +21,35 @@ function isTextEntryTarget(target: EventTarget | null): boolean {
   return target.isContentEditable;
 }
 
-export function useListCursor<T extends { id: number }>(items: T[]) {
+// Task 24's Space/Enter/single-key shortcuts -- all optional so existing
+// callers (NowList.tsx) that just want arrow-key cursor movement can keep
+// calling useListCursor(items) with no second argument at all.
+export interface ListCursorActions {
+  /** Space: toggle the cursor row's checkbox, without moving the cursor. */
+  onToggleSelect?: (id: number) => void;
+  /** Enter: expand the cursor row (same as its own "Expand" menu item). */
+  onExpand?: (id: number) => void;
+  /** Any other single key (e.g. "d", "c", "C", "e", "M", "Backspace",
+      "Delete") -- callers switch on `key` themselves, mirroring whichever
+      subset of the context-menu action set they want reachable this way.
+      Never fired for Space/Enter/ArrowUp/ArrowDown, which are handled above
+      this branch. */
+  onAction?: (key: string, id: number) => void;
+}
+
+export function useListCursor<T extends { id: number }>(
+  items: T[],
+  actions: ListCursorActions = {},
+) {
   const [cursorId, setCursorId] = useState<number | null>(null);
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (items.length === 0) return;
+    // Same guard as arrows above: none of Space/Enter/single-key actions may
+    // fire while focus is inside an <input>/<textarea>/contenteditable --
+    // typing "d" while composing a capture body must type the letter "d",
+    // not fire "mark done" on whatever row the invisible list cursor
+    // happens to be sitting on.
     if (isTextEntryTarget(e.target)) return;
     const index = items.findIndex((i) => i.id === cursorId);
     if (e.key === "ArrowDown") {
@@ -34,6 +58,21 @@ export function useListCursor<T extends { id: number }>(items: T[]) {
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setCursorId(items[Math.max(index - 1, 0)]?.id ?? items[0].id);
+    } else if (e.key === " ") {
+      // Always preventDefault, even with no cursor row yet -- a focused,
+      // non-form element's native Space action is to scroll the page, and
+      // that default must not leak through just because ArrowUp/Down was
+      // never pressed to establish a cursor row first.
+      e.preventDefault();
+      if (cursorId !== null) actions.onToggleSelect?.(cursorId);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (cursorId !== null) actions.onExpand?.(cursorId);
+    } else if (cursorId !== null && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      // Modifier-held combinations (Cmd/Ctrl/Alt+<letter>) are left alone --
+      // e.g. Cmd+C must stay the browser/OS copy shortcut, not this list's
+      // single-key "c" action, even though e.key reports the same letter.
+      actions.onAction?.(e.key, cursorId);
     }
   }
 

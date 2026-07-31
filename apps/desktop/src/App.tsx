@@ -62,6 +62,28 @@ interface CaptureRowActions {
   sections: Section[];
 }
 
+// Task 24's Enter/`e` single-key shortcuts open a specific row's Expand
+// modal or inline editor from outside that row's own component -- see
+// CaptureItem's expandSignal/editSignal props. `token` must change on every
+// trigger (even a repeat press on the row that's already showing) so the
+// row's effect re-fires; `mode` picks which of the two signals to bump.
+interface KeyboardRowTrigger {
+  id: number;
+  mode: "expand" | "edit";
+  token: number;
+}
+
+// Resolves the two per-row signal props for a single CaptureItem from the
+// shared trigger state -- every render site below calls this the same way,
+// so a row only ever receives a defined signal when it's actually the row
+// the keyboard shortcut targeted.
+function rowSignals(trigger: KeyboardRowTrigger | null, captureId: number) {
+  return {
+    expandSignal: trigger?.mode === "expand" && trigger.id === captureId ? trigger.token : undefined,
+    editSignal: trigger?.mode === "edit" && trigger.id === captureId ? trigger.token : undefined,
+  };
+}
+
 // The section-group analog of NowList's `SortableCaptureItem`: the entire
 // header+members block is the draggable unit (so reordering a section
 // carries its rendered captures along with it), but only the header's grip
@@ -74,6 +96,7 @@ function SortableSectionGroup({
   onRenameSection,
   onDeleteSection,
   rowActions,
+  keyboardTrigger,
 }: {
   section: Section;
   captures: Capture[];
@@ -82,6 +105,7 @@ function SortableSectionGroup({
   onRenameSection: (id: number, name: string) => void;
   onDeleteSection: (id: number) => void;
   rowActions: CaptureRowActions;
+  keyboardTrigger: KeyboardRowTrigger | null;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: section.id,
@@ -118,6 +142,7 @@ function SortableSectionGroup({
             onCreateSection={rowActions.onCreateSection}
             projects={rowActions.projects}
             sections={rowActions.sections}
+            {...rowSignals(keyboardTrigger, capture.id)}
           />
         ))}
       </div>
@@ -161,6 +186,18 @@ function App() {
     onUndo: () => void;
   } | null>(null);
   const nextUndoToastId = useRef(0);
+
+  // Task 24's Enter/`e` list shortcuts -- see KeyboardRowTrigger's comment
+  // above. `nextKeyboardTriggerToken` guarantees a fresh token even for a
+  // repeat press on the same row (e.g. Enter, close the modal, Enter
+  // again), the same "identify this firing, not just the target" pattern
+  // `nextUndoToastId` already uses for UndoToast above.
+  const [keyboardTrigger, setKeyboardTrigger] = useState<KeyboardRowTrigger | null>(null);
+  const nextKeyboardTriggerToken = useRef(0);
+  const triggerRow = useCallback((id: number, mode: "expand" | "edit") => {
+    nextKeyboardTriggerToken.current += 1;
+    setKeyboardTrigger({ id, mode, token: nextKeyboardTriggerToken.current });
+  }, []);
 
   const showUndoToast = useCallback((message: string, onUndo: () => void) => {
     nextUndoToastId.current += 1;
@@ -486,6 +523,17 @@ function App() {
 
   const visibleStream = searchResults ?? stream;
 
+  // Task 24's single-key action dispatch below needs each action's own
+  // underlying capture (done_at for the "d" done/reopen toggle, body for the
+  // "c" copy-image-vs-text branch) by id -- covers whichever list is
+  // actually visible (search results or the plain stream), same as
+  // `visibleStream` itself.
+  const captureById = useMemo(() => {
+    const map = new Map<number, Capture>();
+    for (const c of visibleStream) map.set(c.id, c);
+    return map;
+  }, [visibleStream]);
+
   // The stream cursor must move in the same order the rows actually render
   // in, not `visibleStream`'s raw order -- once any section has members, the
   // non-search render below groups all of that section's captures together
@@ -501,7 +549,46 @@ function App() {
     const visibleSections = sections.filter((s) => bySection.has(s.id));
     return [...visibleSections.flatMap((s) => bySection.get(s.id) ?? []), ...unsectioned];
   }, [searchResults, stream, sections]);
-  const streamCursor = useListCursor(streamVisualOrder);
+  // Single-key action dispatch below mirrors the context menu's own
+  // per-action batching exactly (see CaptureItem's buildContextMenuItems):
+  // Copy as List / Merge / Delete already act on "the checked selection if
+  // non-empty, else just this row" there, so "C"/"M"/Backspace-Delete do the
+  // same here via `ids`. Mark Done, Copy, Edit, and Expand are NOT
+  // batch-aware anywhere else in the app today (their menu items always
+  // close over `capture.id`, never `targetIds()`) -- so "d"/"c"/"e"/Enter
+  // stay single-row here too, rather than inventing new batch behavior for
+  // an action that ignores the selection everywhere else it's reachable.
+  const streamCursor = useListCursor(streamVisualOrder, {
+    onToggleSelect: toggleSelect,
+    onExpand: (id) => triggerRow(id, "expand"),
+    onAction: (key, id) => {
+      const capture = captureById.get(id);
+      const ids = selected.size > 0 ? Array.from(selected) : [id];
+      if (key === "d") {
+        // Mirrors the menu's Reopen/Mark Done toggle exactly (see
+        // buildContextMenuItems: `capture.done_at ? Reopen : Mark Done`).
+        if (capture?.done_at) handleReopen(id);
+        else handleDone(id);
+      } else if (key === "c") {
+        // Mirrors the menu's plain "Copy" item, including its
+        // screenshot-vs-text branch.
+        if (capture?.body === "") api.copyCaptureImage(id);
+        else api.copyCaptureText(id);
+      } else if (key === "C") {
+        api.copyCapturesAsChecklist(ids);
+      } else if (key === "e") {
+        // CaptureItem's own editSignal effect ignores this for
+        // screenshots/session digests, matching editActionDisabled.
+        triggerRow(id, "edit");
+      } else if (key === "M") {
+        // handleMergeIds already no-ops below 2 ids (merge_captures itself
+        // rejects it), so no extra guard is needed here.
+        handleMergeIds(ids);
+      } else if (key === "Backspace" || key === "Delete") {
+        handleDeleteCaptures(ids);
+      }
+    },
+  });
 
   const showPermissionBanner =
     !permissionBannerDismissed &&
@@ -617,6 +704,7 @@ function App() {
                         onCreateSection={rowActions.onCreateSection}
                         projects={rowActions.projects}
                         sections={rowActions.sections}
+                        {...rowSignals(keyboardTrigger, capture.id)}
                       />
                     ))}
                   </div>
@@ -651,6 +739,7 @@ function App() {
                                   onRenameSection={handleRenameSection}
                                   onDeleteSection={handleDeleteSection}
                                   rowActions={rowActions}
+                                  keyboardTrigger={keyboardTrigger}
                                 />
                               ))}
                             </SortableContext>
@@ -678,6 +767,7 @@ function App() {
                             onCreateSection={rowActions.onCreateSection}
                             projects={rowActions.projects}
                             sections={rowActions.sections}
+                            {...rowSignals(keyboardTrigger, capture.id)}
                           />
                         ))}
                       </div>
