@@ -90,6 +90,7 @@ impl Store {
             let sql = format!(
                 "SELECT {CAPTURE_COLUMNS} FROM captures
                  WHERE merged_into IS NULL AND (?1 = 0 OR project_id IS ?2)
+                   AND deleted_at IS NULL
                  ORDER BY created_at DESC, id DESC
                  LIMIT ?3 OFFSET ?4"
             );
@@ -112,6 +113,7 @@ impl Store {
             let sql = format!(
                 "SELECT {CAPTURE_COLUMNS} FROM captures
                  WHERE project_id IS ?1 AND queue_pos IS NOT NULL AND done_at IS NULL
+                   AND deleted_at IS NULL
                  ORDER BY queue_pos ASC"
             );
             let mut stmt = conn.prepare(&sql)?;
@@ -256,6 +258,57 @@ impl Store {
             conn.query_row(&sql, params![id], capture_from_row)
                 .optional()?
                 .ok_or(Error::CaptureNotFound(id))
+        })
+    }
+
+    /// Cascades to any capture this one absorbed via merge (`merged_into`
+    /// pointing at it) -- otherwise Undo would restore a capture whose
+    /// merge history silently vanished into orphaned, invisible rows. See
+    /// docs/superpowers/specs/2026-07-31-capture-list-v2-design.md.
+    pub fn soft_delete_capture(&self, id: i64) -> Result<Capture> {
+        self.with_conn(|conn| {
+            let now = now_iso();
+            conn.execute(
+                "UPDATE captures SET deleted_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+                params![now, id],
+            )?;
+            conn.execute(
+                "UPDATE captures SET deleted_at = ?1 WHERE merged_into = ?2 AND deleted_at IS NULL",
+                params![now, id],
+            )?;
+            let sql = format!("SELECT {CAPTURE_COLUMNS} FROM captures WHERE id = ?1");
+            conn.query_row(&sql, params![id], capture_from_row)
+                .optional()?
+                .ok_or(Error::CaptureNotFound(id))
+        })
+    }
+
+    pub fn restore_capture(&self, id: i64) -> Result<Capture> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE captures SET deleted_at = NULL WHERE id = ?1",
+                params![id],
+            )?;
+            conn.execute(
+                "UPDATE captures SET deleted_at = NULL WHERE merged_into = ?1",
+                params![id],
+            )?;
+            let sql = format!("SELECT {CAPTURE_COLUMNS} FROM captures WHERE id = ?1");
+            conn.query_row(&sql, params![id], capture_from_row)
+                .optional()?
+                .ok_or(Error::CaptureNotFound(id))
+        })
+    }
+
+    pub fn list_recently_deleted_captures(&self) -> Result<Vec<Capture>> {
+        self.with_conn(|conn| {
+            let sql = format!(
+                "SELECT {CAPTURE_COLUMNS} FROM captures
+                 WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map([], capture_from_row)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
     }
 }
@@ -491,5 +544,61 @@ mod tests {
         let c = store.capture("note", None).unwrap();
         let err = store.assign_capture_section(c.id, Some(999)).unwrap_err();
         assert!(matches!(err, Error::SectionNotFound(999)));
+    }
+
+    #[test]
+    fn soft_delete_hides_from_stream_and_restore_reverses_it() {
+        let store = Store::open_in_memory().unwrap();
+        let c = store.capture("delete me", None).unwrap();
+
+        let deleted = store.soft_delete_capture(c.id).unwrap();
+        assert!(deleted.deleted_at.is_some());
+        assert!(store.list_stream(None, 100, 0).unwrap().is_empty());
+
+        let restored = store.restore_capture(c.id).unwrap();
+        assert_eq!(restored.deleted_at, None);
+        assert_eq!(store.list_stream(None, 100, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn soft_delete_excludes_from_search() {
+        let store = Store::open_in_memory().unwrap();
+        let c = store.capture("unique needle text", None).unwrap();
+        store.soft_delete_capture(c.id).unwrap();
+        assert!(store.search("needle", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn deleting_a_merged_result_cascades_to_its_absorbed_sources() {
+        let store = Store::open_in_memory().unwrap();
+        let a = store.capture("part one", None).unwrap();
+        let b = store.capture("part two", None).unwrap();
+        let merged = store.merge(&[a.id, b.id]).unwrap();
+
+        store.soft_delete_capture(merged.id).unwrap();
+
+        // Absorbed sources aren't independently listed even when active
+        // (existing merge behavior), but their own deleted_at should now
+        // be set too, so a direct restore of the merge result also
+        // restores their state consistently.
+        let a_row = store.get_capture(a.id).unwrap();
+        assert!(a_row.deleted_at.is_some());
+
+        store.restore_capture(merged.id).unwrap();
+        let a_row = store.get_capture(a.id).unwrap();
+        assert_eq!(a_row.deleted_at, None);
+    }
+
+    #[test]
+    fn list_recently_deleted_captures_returns_only_deleted_ones_newest_first() {
+        let store = Store::open_in_memory().unwrap();
+        let a = store.capture("a", None).unwrap();
+        let b = store.capture("b", None).unwrap();
+        store.soft_delete_capture(a.id).unwrap();
+        store.soft_delete_capture(b.id).unwrap();
+
+        let deleted = store.list_recently_deleted_captures().unwrap();
+        assert_eq!(deleted.len(), 2);
+        assert_eq!(deleted[0].id, b.id); // most-recently-deleted first
     }
 }

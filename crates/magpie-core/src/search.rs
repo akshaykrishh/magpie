@@ -48,7 +48,7 @@ impl Store {
             let sql = format!(
                 "SELECT c.{cols} FROM captures c
                  JOIN captures_fts f ON f.rowid = c.id
-                 WHERE captures_fts MATCH ?1 AND c.merged_into IS NULL
+                 WHERE captures_fts MATCH ?1 AND c.merged_into IS NULL AND c.deleted_at IS NULL
                  ORDER BY bm25(captures_fts) ASC
                  LIMIT ?2",
                 cols = CAPTURE_COLUMNS.replace(", ", ", c."),
