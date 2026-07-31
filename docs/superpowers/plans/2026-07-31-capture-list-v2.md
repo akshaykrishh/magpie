@@ -3016,3 +3016,16 @@ git commit -m "Add runtime hotkey rebinding with validation and failure surfacin
 - **No CLI/MCP changes anywhere in this plan** — matches the spec's explicit "no delete/purge MCP tool, ever" constraint; `crates/magpie-cli` and `crates/magpie-mcp` are never listed as Modify/Create targets in any task.
 - **Cross-window sync events** (mentioned in the spec) are intentionally left to each task's own judgment rather than a separate task — Tasks 10, 19, 20, and 21 all involve mutations visible from both the main window and the pinned dock; when implementing each, follow the existing `now:changed`/`capture:updated` broadcast pattern from `apps/desktop/src/lib/events.ts` for whichever of that task's mutations the dock also displays (Now-list membership, section assignment, deletion of a Now item).
 - **Type consistency check:** `Section` is defined once (Task 1: `model.rs`) and reused verbatim (Tasks 2, 3, 6, 8, 19) — no renamed variant introduced later. `capture_display_text` (Task 15) and `update_capture_body` (Task 16) are each defined once and consumed by exactly the commands that need them (Tasks 15/20 and 16/20 respectively).
+
+## Backlog (not scheduled in this plan)
+
+### Task 29 (future): Real "Edit in New Window" second-window support
+
+Task 20 shipped "Edit in New Window" as a stub (opens the same in-row Expand modal in edit mode) rather than a genuine separate Tauri window, since real second-window infrastructure is a distinct, non-trivial piece of work. Revisited mid-execution: captures have no inherent length limit (not just short snippets — a full AI response, a large code block, a long article can all be captured), so a real separate window is worth building — the same reason Notion/Bear/Apple Notes offer "open in new window" for long documents; the Expand modal alone doesn't give the same room, isn't resizable independently of the main app, and can't be dragged to a second monitor. Decided to scope this as its own follow-up task rather than grow Task 20 further, since it needs:
+- A new route/entry point (mirroring how `dock-main.tsx`/`DockApp.tsx` is a separate mounted window today)
+- A new Tauri window declared in `tauri.conf.json`
+- Capability grants for that window
+- A `get_capture(id)` Tauri command (the new window needs to fetch the capture standalone, not receive it via props)
+- Close/focus semantics consistent with this app's existing multi-window patterns (main, dock, toast)
+
+Not scheduled with a number yet — pick this up as a fresh brainstorming→plan cycle when ready, rather than bolting it onto the current 28-task sequence.
