@@ -1,5 +1,5 @@
 import { emit, listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AddPromptInput } from "./components/AddPromptInput";
 import { AuditView } from "./components/AuditView";
 import { CaptureItem } from "./components/CaptureItem";
@@ -36,9 +36,23 @@ function App() {
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [permissionBannerDismissed, setPermissionBannerDismissed] = useState(false);
   const [undoToast, setUndoToast] = useState<{
+    // Identifies *this showing* of a toast, not the deleted item -- two
+    // deletes of different templates (or even the same message text twice
+    // in a row) must never compare equal here. Used as the React `key` on
+    // <UndoToast> below so a second delete forces a genuine remount instead
+    // of a prop update: content-based dependency comparison can't tell
+    // "same toast, parent re-rendered" apart from "a new toast, same text"
+    // when every call site passes the literal string "Template deleted.".
+    id: number;
     message: string;
     onUndo: () => void;
   } | null>(null);
+  const nextUndoToastId = useRef(0);
+
+  const showUndoToast = useCallback((message: string, onUndo: () => void) => {
+    nextUndoToastId.current += 1;
+    setUndoToast({ id: nextUndoToastId.current, message, onUndo });
+  }, []);
 
   // Stable identities: `undoToast` itself changes every time a new toast is
   // shown, but these two callbacks must NOT change on every unrelated App
@@ -259,7 +273,7 @@ function App() {
                 refreshNow();
                 emit(NOW_CHANGED_EVENT);
               }}
-              onShowUndo={(message, onUndo) => setUndoToast({ message, onUndo })}
+              onShowUndo={showUndoToast}
             />
           )}
 
@@ -269,6 +283,11 @@ function App() {
 
       {undoToast && (
         <UndoToast
+          // `key` forces a fresh mount (and thus a fresh 6s timer) whenever a
+          // logically new toast replaces the one being shown, even if the
+          // message text is identical -- see the comment on `undoToast`'s
+          // `id` field above.
+          key={undoToast.id}
           message={undoToast.message}
           onUndo={undoAndDismissToast}
           onDismiss={dismissUndoToast}

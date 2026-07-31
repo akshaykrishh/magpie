@@ -14,17 +14,21 @@ export function UndoToast({
   onDismiss,
   durationMs = 6000,
 }: UndoToastProps) {
+  // NOTE: distinguishing "a new toast" from "the same toast, parent
+  // re-rendered" must NOT be done via this dependency array (e.g. adding
+  // `message`) -- content can't tell those apart when two different
+  // showings pass equal values (in practice every caller currently passes
+  // the same literal message text), and doing it that way silently drops
+  // the countdown reset for same-text back-to-back toasts. The caller
+  // (App.tsx) is responsible for giving each logically distinct toast a
+  // different `key`, which forces React to unmount/remount this component
+  // -- a fresh mount always re-runs this effect from scratch, regardless of
+  // whether onDismiss/durationMs happen to compare equal to the last
+  // showing's.
   useEffect(() => {
     const handle = setTimeout(onDismiss, durationMs);
     return () => clearTimeout(handle);
-    // `message` is intentionally included even though it's unused in the
-    // effect body: it's what distinguishes "the same toast is still up" from
-    // "a new toast replaced it" when the caller doesn't unmount/remount this
-    // component between toasts (see App.tsx, which keeps a single slot for
-    // at most one toast). A new message should get its own full countdown;
-    // an unrelated parent re-render that leaves message/onDismiss/durationMs
-    // untouched should not reset the timer already in flight.
-  }, [message, onDismiss, durationMs]);
+  }, [onDismiss, durationMs]);
 
   return (
     <div
