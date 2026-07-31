@@ -9,6 +9,7 @@ import { NowList } from "./components/NowList";
 import { PermissionBanner } from "./components/PermissionBanner";
 import { SearchBar } from "./components/SearchBar";
 import { TemplatesPanel } from "./components/TemplatesPanel";
+import { UndoToast } from "./components/UndoToast";
 import { api } from "./lib/api";
 import { NOW_CHANGED_EVENT } from "./lib/events";
 import type { Capabilities, Capture } from "./lib/types";
@@ -34,6 +35,10 @@ function App() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [permissionBannerDismissed, setPermissionBannerDismissed] = useState(false);
+  const [undoToast, setUndoToast] = useState<{
+    message: string;
+    onUndo: () => void;
+  } | null>(null);
 
   const refreshStream = useCallback(() => {
     api.listStream({ kind: "all" }).then(setStream).catch(console.error);
@@ -239,12 +244,24 @@ function App() {
                 refreshNow();
                 emit(NOW_CHANGED_EVENT);
               }}
+              onShowUndo={(message, onUndo) => setUndoToast({ message, onUndo })}
             />
           )}
 
           {view === "activity" && <AuditView />}
         </section>
       </div>
+
+      {undoToast && (
+        <UndoToast
+          message={undoToast.message}
+          onUndo={() => {
+            undoToast.onUndo();
+            setUndoToast(null);
+          }}
+          onDismiss={() => setUndoToast(null)}
+        />
+      )}
     </main>
   );
 }

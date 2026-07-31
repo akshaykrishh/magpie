@@ -5,9 +5,10 @@ import type { Project, Template } from "@/lib/types";
 
 interface TemplatesPanelProps {
   onInstantiated: () => void;
+  onShowUndo: (message: string, onUndo: () => void) => void;
 }
 
-export function TemplatesPanel({ onInstantiated }: TemplatesPanelProps) {
+export function TemplatesPanel({ onInstantiated, onShowUndo }: TemplatesPanelProps) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [editing, setEditing] = useState<Template | "new" | null>(null);
@@ -41,8 +42,12 @@ export function TemplatesPanel({ onInstantiated }: TemplatesPanelProps) {
   }
 
   async function remove(id: number) {
-    await api.deleteTemplate(id);
-    refresh();
+    await api.deleteTemplate(id); // now soft-delete (Task 5) -- same call, new semantics
+    setTemplates((prev) => prev.filter((t) => t.id !== id));
+    onShowUndo("Template deleted.", async () => {
+      await api.restoreTemplate(id);
+      refresh();
+    });
   }
 
   async function instantiate(
