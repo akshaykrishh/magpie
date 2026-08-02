@@ -16,6 +16,7 @@ import type {
   StreamRow,
   Tag,
   Template,
+  UpdateStatus,
 } from "./types";
 
 export const api = {
@@ -187,4 +188,11 @@ export const api = {
   getSetting: (key: SettingKey) => invoke<string | null>("get_setting", { key }),
   setSetting: (key: SettingKey, value: string) =>
     invoke<void>("set_setting", { key, value }),
+
+  getUpdateStatus: () => invoke<UpdateStatus>("get_update_status"),
+  checkForUpdates: () => invoke<void>("check_for_updates"),
+  installUpdate: () => invoke<void>("install_update"),
+  skipUpdateVersion: (version: string) =>
+    invoke<void>("skip_update_version", { version }),
+  unskipUpdateVersion: () => invoke<void>("unskip_update_version"),
 };
