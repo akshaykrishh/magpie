@@ -256,8 +256,16 @@ pub fn run() {
             toast::init_toast_panel(app.handle());
             aim::init_aim_panel(app.handle());
             across::init_across_panel(app.handle());
-            tray::init_tray(app.handle())?;
+            // `updater::init` must run before `tray::init_tray`: the tray's
+            // initial menu build (`rebuild_tray_menu_for`) reads
+            // `UpdaterState` via `updater::current_status` synchronously
+            // during `init_tray`, which panics ("state() called before
+            // manage()") unless `updater::init`'s `app.manage(UpdaterState
+            // {...})` has already run. `updater::init` has no reverse
+            // dependency on the tray -- it only manages state and spawns an
+            // independent async background-check loop.
             updater::init(app.handle());
+            tray::init_tray(app.handle())?;
 
             Ok(())
         })
