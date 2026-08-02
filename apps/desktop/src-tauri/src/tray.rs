@@ -92,7 +92,7 @@ fn tray_icon(app: &AppHandle) -> Option<TrayIcon> {
     app.tray_by_id(TRAY_ID)
 }
 
-fn rebuild_tray_menu(app: &AppHandle) {
+pub(crate) fn rebuild_tray_menu(app: &AppHandle) {
     if let Some(tray) = tray_icon(app) {
         rebuild_tray_menu_for(app, &tray);
     }

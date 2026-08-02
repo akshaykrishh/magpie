@@ -10,6 +10,7 @@ mod settings_commands;
 mod state;
 mod toast;
 mod tray;
+mod updater;
 
 use std::sync::Mutex;
 
@@ -196,6 +197,11 @@ pub fn run() {
             commands::select_across_project,
             commands::hide_across,
             commands::toggle_across,
+            updater::get_update_status,
+            updater::check_for_updates,
+            updater::install_update,
+            updater::skip_update_version,
+            updater::unskip_update_version,
         ])
         .on_window_event(|window, event| {
             if matches!(window.label(), "main" | "dock" | "settings") {
@@ -251,6 +257,7 @@ pub fn run() {
             aim::init_aim_panel(app.handle());
             across::init_across_panel(app.handle());
             tray::init_tray(app.handle())?;
+            updater::init(app.handle());
 
             Ok(())
         })
