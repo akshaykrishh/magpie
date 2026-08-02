@@ -105,6 +105,14 @@ jobs:
       - name: Check release invariants
         run: scripts/check-release-invariants.sh
 
+      # extract-changelog.sh will directly generate GitHub release body
+      # text in a later chunk, so (like check-release-invariants.sh) it's
+      # tested before being trusted -- a guardrail script has broken
+      # silently in this repo before (see the accent-hex guard's own
+      # exclusion-pattern bug).
+      - name: Test extract-changelog.sh
+        run: scripts/extract-changelog.test.sh
+
   build:
     needs: lint-and-test
     strategy:
