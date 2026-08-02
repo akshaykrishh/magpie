@@ -286,6 +286,13 @@ pub fn get_update_status(state: State<UpdaterState>) -> UpdateStatus {
     state.status.lock().unwrap().clone()
 }
 
+/// Same read, for call sites (tray.rs) that already have an `&AppHandle`
+/// rather than a command-injected `State` -- both go through the same
+/// `UpdaterState.status` lock, never a second source of truth.
+pub(crate) fn current_status(app: &AppHandle) -> UpdateStatus {
+    app.state::<UpdaterState>().status.lock().unwrap().clone()
+}
+
 #[tauri::command]
 pub async fn check_for_updates(app: AppHandle) -> CmdResult<()> {
     run_check(&app).await;
