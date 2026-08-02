@@ -93,6 +93,18 @@ jobs:
             exit 1
           fi
 
+      # A guardrail script has broken silently in this repo before (see
+      # the accent-hex guard's own exclusion-pattern bug) -- test the
+      # tester before trusting its output on real code.
+      - name: Test check-release-invariants.sh
+        run: scripts/check-release-invariants.test.sh
+
+      # Enforces the version-single-source-of-truth and changelog
+      # discipline the release pipeline depends on, checked on every push
+      # so it can never silently drift.
+      - name: Check release invariants
+        run: scripts/check-release-invariants.sh
+
   build:
     needs: lint-and-test
     strategy:
