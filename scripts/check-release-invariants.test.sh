@@ -91,6 +91,25 @@ make_fixture
 assert_exit "tag matches Cargo.toml version, changelog section filled: passes" 0 v0.1.0
 
 make_fixture
+# CHANGELOG.md has valid non-empty dated sections for both 0.1.0 and 0.2.0 so
+# that the only possible failure reason here is the version mismatch itself
+# -- otherwise this case can't distinguish "mismatch check works" from
+# "changelog-emptiness check works", since a naive fixture (Cargo.toml still
+# at 0.1.0, no 0.2.0 changelog section) would fail for the wrong reason even
+# if the mismatch check were silently broken.
+cat > "$fixture/CHANGELOG.md" <<'EOF'
+# Changelog
+
+## [Unreleased]
+
+## [0.2.0] - 2026-08-02
+
+- Prospective release notes (never actually cut; Cargo.toml stays at 0.1.0 in this fixture).
+
+## [0.1.0] - 2026-08-02
+
+- Initial release.
+EOF
 assert_exit "tag does not match Cargo.toml version fails" 1 v0.2.0
 
 make_fixture
