@@ -1,0 +1,84 @@
+/* The aim panel's entire visual design, hand-written CSS -- same reasoning
+   as toast.css: this window ships without React or Tailwind (see
+   src/aim.ts), so it pulls its colors from styles/tokens.css directly
+   rather than the @theme-generated utility classes the rest of the app
+   uses, keeping the accent-flip rule from drifting out of sync here.
+
+   Window is fixed at 320x260 (see tauri.conf.json) -- ten rows at a
+   compact line-height fit with room to spare at the common case (2-4
+   candidates); a resizable panel is the same can of worms toast.css's
+   comment already describes for a non-activating NSPanel. */
+
+@import "./tokens.css";
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/700.css";
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#aim {
+  box-sizing: border-box;
+  width: 320px;
+  max-height: 260px;
+  padding: 8px;
+  border-radius: 13px;
+  border: 1px solid var(--mp-hairline-strong);
+  background: var(--mp-overlay);
+  backdrop-filter: blur(20px);
+  box-shadow: var(--mp-shadow-float);
+  font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+#candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 9px;
+}
+
+/* The one candidate the release will actually commit to -- everything
+   else in the list is informational, this row is the answer. */
+.row.selected {
+  background: var(--mp-accent-tint);
+}
+
+.digit {
+  flex: none;
+  width: 18px;
+  text-align: center;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--mp-fg-faint);
+}
+.row.selected .digit {
+  color: var(--mp-accent);
+}
+
+.name {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--mp-fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row.selected .name {
+  color: var(--mp-fg);
+}

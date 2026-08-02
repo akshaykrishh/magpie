@@ -2285,6 +2285,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "dirs",
  "magpie-core",
  "magpie-mcp",
  "serde",
@@ -4120,7 +4121,7 @@ dependencies = [
 [[package]]
 name = "tauri-nspanel"
 version = "2.1.0"
-source = "git+https://github.com/ahkohd/tauri-nspanel?branch=v2.1#a3122e894383aa068ec5365a42994e3ac94ba1b6"
+source = "git+https://github.com/ahkohd/tauri-nspanel?rev=a3122e894383aa068ec5365a42994e3ac94ba1b6#a3122e894383aa068ec5365a42994e3ac94ba1b6"
 dependencies = [
  "objc2",
  "objc2-app-kit",

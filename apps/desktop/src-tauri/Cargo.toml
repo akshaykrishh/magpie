@@ -35,5 +35,9 @@ tauri-plugin-global-shortcut = "2"
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
+# Pinned to a rev (not the v2.1 branch tip) -- the redesign adds two more
+# non-activating panels (aim, across) on top of the toast, so an upstream
+# change landing on the branch would now affect three windows at once
+# instead of one.
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", rev = "a3122e894383aa068ec5365a42994e3ac94ba1b6" }
 

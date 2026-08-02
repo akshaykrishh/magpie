@@ -76,6 +76,23 @@ jobs:
         working-directory: apps/desktop
         run: pnpm exec tsc --noEmit
 
+      # The accent-flip rule (styles/tokens.css's own doc comment, and the
+      # redesign plan's stage 12): #3E7A92 is dark-grounds-only, #123A4B is
+      # light-grounds-only, and neither should ever be hardcoded outside
+      # tokens.css -- every other call site should flip via --mp-accent (or
+      # index.css's --color-slate-teal/-light, themselves sourced from
+      # tokens.css's fixed constants) instead. A literal hex anywhere else
+      # is exactly the kind of thing that silently breaks one theme without
+      # anyone noticing until someone happens to open the app in the other
+      # one -- see Logo.tsx's fix for a real example this would have caught.
+      - name: Guard against hardcoded accent hex outside tokens.css
+        working-directory: apps/desktop/src
+        run: |
+          if grep -rn '3E7A92\|3e7a92\|123A4B\|123a4b' . --include='*.ts' --include='*.tsx' --include='*.css' --include='*.html' | grep -v 'styles/tokens\.css:'; then
+            echo "::error::Hardcoded accent hex found outside styles/tokens.css -- use var(--mp-accent) (or tokens.css's --mp-accent-on-light/-on-dark for the rare fixed-color case) instead."
+            exit 1
+          fi
+
   build:
     needs: lint-and-test
     strategy:

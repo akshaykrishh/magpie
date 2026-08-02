@@ -25,16 +25,15 @@ export function AddPromptInput({ onAdd }: AddPromptInputProps) {
           if (e.key === "Enter") submit();
         }}
         placeholder="Type a prompt to queue…"
-        className="flex-1 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm
-                   text-neutral-800 placeholder:text-neutral-400 focus:border-slate-teal
-                   focus:outline-none dark:border-neutral-800 dark:bg-neutral-900
-                   dark:text-neutral-200"
+        className="flex-1 rounded-lg border border-hairline bg-surface px-3 py-2 text-sm
+                   text-fg placeholder:text-fg-faint focus:border-accent-line
+                   focus:outline-none"
       />
       <button
         type="button"
         onClick={submit}
         disabled={!value.trim()}
-        className="flex items-center justify-center rounded-lg bg-slate-teal p-2 text-white
+        className="flex items-center justify-center rounded-lg bg-accent p-2 text-fg-on-accent
                    hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
       >
         <Plus size={16} />

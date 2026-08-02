@@ -4,14 +4,16 @@ import { GripVertical } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { CAPTURE_UPDATED_EVENT } from "@/lib/events";
-import type { Blob as CaptureBlob, Capture, Project, Section } from "@/lib/types";
+import type { NowRowState } from "@/lib/format";
+import type { Blob as CaptureBlob, Capture, Project, Section, StreamRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { Chip, Mono, StatusGlyph } from "./ui";
 import { ContextMenu, ContextMenuTrigger, type ContextMenuItem } from "./ContextMenu";
 import { EditableBody } from "./EditableBody";
 import { ExpandedCaptureModal } from "./ExpandedCaptureModal";
 import { MarkdownBody } from "./MarkdownBody";
 
-interface CaptureItemProps {
+interface CaptureRowProps {
   capture: Capture;
   selected?: boolean;
   onToggleSelect?: (id: number) => void;
@@ -26,10 +28,8 @@ interface CaptureItemProps {
   onDone?: (id: number) => void;
   onDemote?: (id: number) => void;
   onReopen?: (id: number) => void;
-  /** Persists an edited body (Task 16's `updateCaptureBody`) and refreshes
-      whatever lists this capture may appear in -- owned by App.tsx, same
-      shape as onDone/onPromote/etc., since saving an edit needs the same
-      "mutate then refetch" the rest of this list already does. */
+  /** Persists an edited body and refreshes whatever lists this capture may
+      appear in -- owned by the shell, same shape as onDone/onPromote/etc. */
   onEdit?: (id: number, body: string) => Promise<void>;
   onMerge?: (ids: number[]) => void;
   onDelete?: (ids: number[]) => void;
@@ -41,46 +41,64 @@ interface CaptureItemProps {
   /** Drag handle + listeners, supplied by a sortable wrapper in the Now list. */
   dragHandleProps?: React.HTMLAttributes<HTMLButtonElement>;
   className?: string;
-  /** Task 24's Enter-key list shortcut: this row's `expanded` state has no
-      external setter (the row's own "Expand" menu item just calls
-      `setExpanded(true)` directly) -- bumping this to any new value (it
-      need not be sequential, just different from the previous render) opens
-      the same Expand modal, from outside the component, exactly as if that
-      menu item had been clicked. `undefined` (the default) never triggers
-      it, including on mount. */
+  /** This row's `expanded` state has no external setter (its own "Expand"
+      menu item just calls `setExpanded(true)` directly) -- bumping this to
+      any new value (it need not be sequential, just different from the
+      previous render) opens the same Expand modal, from outside the
+      component, exactly as if that menu item had been clicked. `undefined`
+      (the default) never triggers it, including on mount. */
   expandSignal?: number;
   /** Same mechanism as `expandSignal`, but for the row's own "Edit" item
-      (`setEditing(true)`, the inline editor -- no modal), used by Task 24's
-      `e` single-key shortcut. Ignored for screenshots/session digests, the
-      same captures the "Edit" menu item itself disables for. */
+      (`setEditing(true)`, the inline editor -- no modal). Ignored for
+      screenshots/session digests, the same captures the "Edit" menu item
+      itself disables for. */
   editSignal?: number;
   /** Whether this row is the list's current keyboard cursor (`useListCursor`'s
       `cursorId === capture.id`) -- entirely separate from `selected`
-      (checkbox multi-select). The design's Gmail/Superhuman model keeps
-      these two concepts visually distinct: `selected` is "which rows a
-      batch action would act on," this is "where my keyboard focus
-      currently is." Both can be true on the same row at once, so the two
-      styles must be able to render simultaneously without one masking the
-      other (see the outline-vs-ring choice below). Defaults to false, so
-      omitting it entirely (e.g. any caller not wired to a cursor) never
-      shows a highlight. */
+      (checkbox multi-select). Both can be true on the same row at once, so
+      the two styles must be able to render simultaneously without one
+      masking the other (see the outline-vs-ring choice below). */
   isCursor?: boolean;
-  /** Task 25's keyboard shortcut (the `ContextMenu` key / Shift+F10) opens
-      this exact row's context menu from outside the component, the same way
-      `expandSignal`/`editSignal` reach in for Expand/Edit -- but positioning
-      the menu needs an (x, y) computed from this row's on-screen location
-      (App.tsx reads it via `document.getElementById` and this row's own
-      `id` attribute below), not just a "fire" token, so the mechanism here
-      is a registration callback rather than a signal: on mount, this row
-      hands App.tsx a small function that forwards straight through to
-      `menuOpenRef` -- the identical imperative open the "..." button and
-      right-click already use -- keyed by `capture.id` in a map App.tsx
-      keeps for every visible row, and unregisters it on unmount so a
-      removed/re-filtered row can never be invoked after the fact. */
+  /** Opens this exact row's context menu from outside the component the
+      same way expandSignal/editSignal reach in for Expand/Edit -- but
+      positioning the menu needs an (x, y) computed from this row's
+      on-screen location, not just a "fire" token, so the mechanism here is
+      a registration callback: on mount, this row hands the caller a small
+      function forwarding straight through to menuOpenRef, the identical
+      imperative open the "..." button and right-click already use, keyed
+      by capture.id. */
   onRegisterMenuOpen?: (id: number, open: ((x: number, y: number) => void) | null) => void;
+
+  /// Present only when this row renders inside the Now column -- selects
+  /// the five-state status glyph + state-specific chip row. See
+  /// lib/format.ts's `nowRowState` for the derivation and priority order;
+  /// computed by the caller (NowList), not re-derived here, since NowList
+  /// is also where the session lookup for `leaseLabel` lives.
+  nowState?: NowRowState;
+  /// "LEASED BY S1 · 12M" -- only rendered when `nowState === "leased"`.
+  /// Elapsed, never a countdown -- see lib/format.ts's `elapsed` doc
+  /// comment on why leases have no expiry to count down to.
+  leaseLabel?: string;
+  /// The Now column's `⌥⌫ REVOKE` action -- only shown when `nowState ===
+  /// "leased"`.
+  onRevokeLease?: () => void;
+  /// The hand-back review sheet's entry point -- only shown when
+  /// `nowState === "handback"`.
+  onOpenReview?: () => void;
+
+  /// Present only in the stream -- the joined provenance stream.rs's
+  /// `list_stream_rows` computes (source app, project name + filing
+  /// confidence, session label, merge count, OCR-pending state). When
+  /// given, its `blob_mime`/`ocr_text`/`blob_width`/`blob_height` are used
+  /// instead of a per-row `get_capture_blob` IPC call -- part of the N+1
+  /// fix `list_stream_rows` exists for. `get_blob_image_data_url` (the
+  /// actual pixel data) is still fetched per-row below; gating that to
+  /// on-screen rows via an IntersectionObserver is a real follow-up, not
+  /// done in this pass -- see the redesign plan's stage 4 risk notes.
+  streamRow?: StreamRow;
 }
 
-export function CaptureItem({
+export function CaptureRow({
   capture,
   selected = false,
   onToggleSelect,
@@ -103,7 +121,12 @@ export function CaptureItem({
   editSignal,
   isCursor = false,
   onRegisterMenuOpen,
-}: CaptureItemProps) {
+  nowState,
+  leaseLabel,
+  onRevokeLease,
+  onOpenReview,
+  streamRow,
+}: CaptureRowProps) {
   const timestamp = formatDistanceToNow(new Date(capture.created_at), {
     addSuffix: true,
   });
@@ -125,9 +148,14 @@ export function CaptureItem({
     let cancelled = false;
 
     function load() {
-      api.getCaptureBlob(capture.id).then((b) => {
-        if (!cancelled) setBlob(b);
-      });
+      // streamRow already carries blob_mime/ocr_text (see this component's
+      // doc comment) -- skip the metadata round trip when it's available,
+      // still fetch it directly for Now-column rows (no streamRow there).
+      if (!streamRow) {
+        api.getCaptureBlob(capture.id).then((b) => {
+          if (!cancelled) setBlob(b);
+        });
+      }
       api.getBlobImageDataUrl(capture.id).then((url) => {
         if (!cancelled) setImageUrl(url);
       });
@@ -143,22 +171,26 @@ export function CaptureItem({
       cancelled = true;
       unlisten.then((f) => f());
     };
-  }, [capture.id, mightHaveBlob]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- streamRow's
+    // identity churns every refetch; only its *presence* (fetch strategy)
+    // should re-arm this effect, not its content.
+  }, [capture.id, mightHaveBlob, !!streamRow]);
 
   async function handleSaveEdit(body: string) {
     if (onEdit) await onEdit(capture.id, body);
     setEditing(false);
   }
 
-  // Real "open a second OS window" infrastructure (a dedicated Tauri
-  // WebviewWindow + route + a way to hydrate it with this one capture) isn't
-  // wired up anywhere in this app yet -- every window today (main/toast/dock)
-  // is declared statically in tauri.conf.json and vite.config.ts's
-  // rollupOptions.input, and there's no "get a single capture by id" command
-  // to hand that new window its data. Building all of that is out of scope
-  // for wiring an existing action into a menu, so this opens the same Expand
-  // modal already in edit mode as a stand-in -- a real new-window
-  // implementation is a follow-up, not something this task should invent.
+  // Real "open a second OS window" infrastructure isn't wired up anywhere
+  // in this app yet -- every window is declared statically in
+  // tauri.conf.json and vite.config.ts's rollupOptions.input, and there's
+  // no "get a single capture by id" command to hand a new window its data.
+  // This opens the same Expand modal already in edit mode as a stand-in.
+  // Folding ExpandedCaptureModal into overlays/OverlayHost.tsx (per the
+  // redesign plan's stage 5b notes) is deferred to whenever this stand-in
+  // is finally replaced with a real window -- doing it now would mean
+  // duplicating this row's own blob-fetching state at the host level for
+  // no functional gain yet.
   function openEditWindow() {
     setExpanded(true);
     setEditing(true);
@@ -201,60 +233,40 @@ export function CaptureItem({
   const editActionDisabled = isSessionDigest || isScreenshot;
 
   // Latest-value ref for the editSignal effect below -- deliberately NOT a
-  // dependency of that effect. `onEdit` traces back to App.tsx's
-  // `rowActions.onEdit` (a fresh object + a plain non-memoized function on
-  // every App render) and `editActionDisabled` is a plain const recomputed
-  // every render, so putting either in the effect's deps would re-run it
-  // (and re-fire `setEditing(true)`) on *any* unrelated App re-render --
-  // e.g. toggling a different row's checkbox after the user pressed `e` and
-  // then explicitly canceled the edit -- silently reopening a canceled
-  // editor. Reading the latest values through this ref instead lets the
-  // effect depend on `[editSignal]` alone (the same shape as expandSignal's
-  // effect below), so it only ever re-runs when `editSignal` itself changes
-  // to a genuinely new token.
+  // dependency of that effect. See the original design rationale: putting
+  // either in the effect's deps would re-run it (and re-fire
+  // setEditing(true)) on any unrelated re-render.
   const editGateRef = useRef({ onEdit, editActionDisabled });
   editGateRef.current = { onEdit, editActionDisabled };
 
-  // See expandSignal/editSignal's doc comments above -- each effect only
-  // fires when its own signal changes to a defined value, mirroring exactly
-  // what the corresponding context-menu item's onClick already does.
   useEffect(() => {
     if (expandSignal !== undefined) setExpanded(true);
   }, [expandSignal]);
 
   useEffect(() => {
-    // Same two gates the "Edit" menu item itself applies: no handler wired
-    // at all (e.g. this row has no onEdit, so the menu wouldn't even show
-    // the item), or this capture's kind/shape disables it. Read from the
-    // ref, not the props/const directly -- see editGateRef's comment above.
     const { onEdit: currentOnEdit, editActionDisabled: currentlyDisabled } = editGateRef.current;
     if (editSignal !== undefined && !currentlyDisabled && currentOnEdit) setEditing(true);
   }, [editSignal]);
 
-  // Task 25: hand App.tsx a stable forwarding function it can key by
-  // capture.id and call from its keyboard-shortcut handler -- forwards
-  // straight through to menuOpenRef, the same imperative open the "..."
-  // button and right-click already use, so the shortcut can never open a
-  // different menu instance than those two. Unregisters on unmount/id
-  // change so a row that's scrolled out of a filtered/re-sorted list can't
-  // be invoked after it's gone.
   useEffect(() => {
     if (!onRegisterMenuOpen) return;
     onRegisterMenuOpen(capture.id, (x, y) => menuOpenRef.current?.(x, y));
     return () => onRegisterMenuOpen(capture.id, null);
   }, [capture.id, onRegisterMenuOpen]);
 
+  // OCR-pending is only knowable from streamRow (joined) or blob (Now-row
+  // fetch) -- `capture.body === ""` alone can't distinguish "still reading
+  // text" from "no text was ever recognized."
+  const ocrText = streamRow ? streamRow.ocr_text : blob?.ocr_text;
+  const hasBlob = streamRow ? streamRow.blob_mime !== null : blob !== null;
+
   return (
     <div
       // Only given an id when this row is wired to the keyboard-cursor
       // mechanism (onRegisterMenuOpen present) -- a promoted capture can be
       // rendered twice on screen at once (once here, once as its own
-      // separate CaptureItem in NowList's sidebar, which never passes
-      // onRegisterMenuOpen), and NowList has no keyboard cursor of its own
-      // to need this id for. Omitting it there keeps `capture-${id}` unique
-      // in the DOM, so App.tsx's `document.getElementById` lookup for
-      // Task 25's shortcut can't ever resolve to the wrong (sidebar) copy's
-      // bounding rect.
+      // separate CaptureRow in NowList's sidebar), and NowList has no
+      // keyboard cursor of its own to need this id for.
       id={onRegisterMenuOpen ? `capture-${capture.id}` : undefined}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -263,7 +275,11 @@ export function CaptureItem({
       className={cn(
         "group flex items-start gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2.5",
         "dark:border-neutral-800 dark:bg-neutral-900",
-        selected && "border-slate-teal ring-1 ring-slate-teal dark:border-slate-teal-light dark:ring-slate-teal-light",
+        nowState === "leased" && "bg-lease border-accent-line",
+        nowState === "handback" && "border-accent-line bg-accent-tint",
+        nowState === "pinned" && "opacity-50",
+        selected &&
+          "border-slate-teal ring-1 ring-slate-teal dark:border-slate-teal-light dark:ring-slate-teal-light",
         // Deliberately a native `outline` (a separate box property from the
         // `border`/`ring` `selected` uses above) in a neutral gray rather
         // than the brand teal -- so a row that's both the keyboard cursor
@@ -285,17 +301,33 @@ export function CaptureItem({
         </button>
       )}
 
+      {nowState && (
+        <div className="mt-1 shrink-0">
+          <StatusGlyph state={nowState} />
+        </div>
+      )}
+
       {onToggleSelect && (
         <input
           type="checkbox"
           checked={selected}
           onChange={() => onToggleSelect(capture.id)}
-          className="mt-1 size-4 shrink-0 accent-slate-teal"
+          className="mt-1 size-4 shrink-0 accent-accent"
         />
       )}
 
       <div className="min-w-0 flex-1">
-        {blob ? (
+        {isSessionDigest ? (
+          <div className="rounded-md border border-dashed border-accent-line bg-accent-tint px-2 py-1.5">
+            <MarkdownBody
+              text={capture.body}
+              className="text-xs text-neutral-600 dark:text-neutral-300"
+            />
+            <Mono size="xs" tone="accent" className="mt-1 block">
+              SESSION DIGEST
+            </Mono>
+          </div>
+        ) : hasBlob ? (
           <div className="flex flex-col gap-1.5">
             {imageUrl && (
               <img
@@ -304,10 +336,16 @@ export function CaptureItem({
                 className="max-h-48 w-fit max-w-full rounded-md border border-neutral-200 object-contain dark:border-neutral-800"
               />
             )}
-            <MarkdownBody
-              text={blob.ocr_text ?? "Reading text…"}
-              className="text-xs text-neutral-500 dark:text-neutral-400"
-            />
+            {ocrText ? (
+              <MarkdownBody
+                text={ocrText}
+                className="text-xs text-neutral-500 dark:text-neutral-400"
+              />
+            ) : (
+              <Mono size="sm" tone="accent">
+                ◐ READING TEXT…
+              </Mono>
+            )}
           </div>
         ) : (
           // The row's own inline editor is suppressed while the Expand modal
@@ -320,9 +358,73 @@ export function CaptureItem({
             onCancel={() => setEditing(false)}
           />
         )}
-        <p className="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
-          {timestamp}
-        </p>
+
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <p className="text-xs text-neutral-400 dark:text-neutral-500">{timestamp}</p>
+
+          {/* Stream provenance -- source app, project + filing confidence,
+              session, merge count. Absent (not shown empty) when the
+              underlying field is null -- see the redesign plan's "render
+              as unknown, never invent." */}
+          {streamRow?.source_app_name && (
+            <Mono size="xs" tone="faint">
+              {streamRow.source_app_name.toUpperCase()}
+            </Mono>
+          )}
+          {streamRow?.project_name && (
+            <Chip variant={streamRow.capture.filed_confidence === "certain" ? "neutral" : "accent"}>
+              {streamRow.project_name.toUpperCase()}
+              {streamRow.capture.filed_confidence ? ` — ${streamRow.capture.filed_confidence.toUpperCase()}` : ""}
+            </Chip>
+          )}
+          {streamRow?.session_ordinal != null && (
+            <Mono size="xs" tone="faint">
+              S{streamRow.session_ordinal}
+              {streamRow.session_client ? ` · ${streamRow.session_client.toUpperCase()}` : ""}
+            </Mono>
+          )}
+          {streamRow && streamRow.merged_count > 0 && (
+            <Chip variant="neutral">MERGED ×{streamRow.merged_count}</Chip>
+          )}
+
+          {/* Now-row state chips -- leased/handback only; pinned/done/open
+              carry no extra chip beyond the glyph itself. */}
+          {nowState === "leased" && leaseLabel && (
+            <>
+              <Chip variant="accent">{leaseLabel}</Chip>
+              {onRevokeLease && (
+                <button
+                  type="button"
+                  onClick={onRevokeLease}
+                  className="text-label-sm text-fg-faint hover:text-fg-muted"
+                >
+                  <Mono size="xs" tone="faint">
+                    ⌥⌫ REVOKE
+                  </Mono>
+                </button>
+              )}
+            </>
+          )}
+          {nowState === "pinned" && capture.branch && (
+            <Mono size="xs" tone="faint">
+              PINNED TO {capture.branch.toUpperCase()}
+            </Mono>
+          )}
+          {nowState === "handback" && (
+            <>
+              {capture.diff_stat && (
+                <Mono size="xs" tone="accent">
+                  {capture.diff_stat.split("\n").pop()}
+                </Mono>
+              )}
+              {onOpenReview && (
+                <Chip variant="solid" onClick={onOpenReview}>
+                  ⏎ REVIEW
+                </Chip>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       <div className="shrink-0">
@@ -370,8 +472,7 @@ export function CaptureItem({
     // Same omission pattern as Mark Done/Reopen/Promote/Demote above: when a
     // list (e.g. NowList/DockApp) doesn't wire a handler down at all, the
     // corresponding action is simply absent rather than a permanently
-    // disabled dead entry -- that's what keeps those rows' menus at their
-    // clean, pre-Task-20 shape instead of a wall of grayed-out items.
+    // disabled dead entry.
     if (onEdit) {
       items.push({ label: "Edit", onClick: () => setEditing(true), disabled: editActionDisabled });
       items.push({

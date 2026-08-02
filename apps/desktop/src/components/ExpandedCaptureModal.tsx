@@ -7,7 +7,7 @@ import { MarkdownBody } from "./MarkdownBody";
 interface ExpandedCaptureModalProps {
   capture: Capture;
   /** Screenshot captures' image + OCR text. These are prefetched by
-      CaptureItem's own blob-loading effect (see its `mightHaveBlob` effect)
+      CaptureRow's own blob-loading effect (see its `mightHaveBlob` effect)
       for the row's normal, non-expanded rendering -- passing them down here
       reuses that single fetch instead of re-requesting the same blob a
       second time just because the row happens to be expanded. Plain text
@@ -19,7 +19,7 @@ interface ExpandedCaptureModalProps {
   onSave: (body: string) => Promise<void>;
   /** Task 20's "Edit in New Window" reuses this same modal as a stand-in
       for a dedicated second window (no real second-window infra exists
-      yet -- see CaptureItem's openEditWindow comment), opening it already
+      yet -- see CaptureRow's openEditWindow comment), opening it already
       in edit mode. Defaults to false for the plain "Expand" entry point,
       which should always start as a read-only preview. */
   startEditing?: boolean;
@@ -37,10 +37,10 @@ export function ExpandedCaptureModal({
   const [editing, setEditing] = useState(startEditing);
 
   // A screenshot's visible content is the image + OCR text (blob.ocr_text),
-  // not capture.body (which stays "" for these -- see CaptureItem's
+  // not capture.body (which stays "" for these -- see CaptureRow's
   // mightHaveBlob comment), so there's nothing meaningful to edit here.
   // Session digests are similarly not user-editable prose. Matches the
-  // `editActionDisabled` gating CaptureItem already applies to the
+  // `editActionDisabled` gating CaptureRow already applies to the
   // Edit/Edit-in-New-Window context-menu entries for the same captures.
   const canEdit = !blob && capture.kind !== "session_digest";
 

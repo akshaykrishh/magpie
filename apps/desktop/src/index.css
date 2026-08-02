@@ -1,22 +1,115 @@
 @import "tailwindcss";
+@import "./styles/tokens.css";
 
+@import "@fontsource/space-grotesk/400.css";
+@import "@fontsource/space-grotesk/500.css";
 @import "@fontsource/space-grotesk/700.css";
 @import "@fontsource/jetbrains-mono/400.css";
 @import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/700.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Brand palette -- see docs/design.md or the brand sheet for the source of
-   truth. `slate-teal-light` is explicitly "wing on dark grounds only" per
-   the brand spec, so it's the dark-mode accent, not a general-purpose tint. */
-@theme {
+/* Semantic layer over styles/tokens.css. `inline` is required here, not
+   optional: without it Tailwind snapshots the light (`:root`) value of
+   each `--mp-*` custom property at build time and bakes it into every
+   generated utility class, so `.dark` would never take effect on already-
+   compiled classes. `inline` makes every generated utility reference
+   `var(--mp-*)` directly, so flipping `.dark` on <html> re-resolves every
+   utility already in the DOM -- see src/lib/theme-boot.ts. */
+@theme inline {
+  --color-ground: var(--mp-ground);
+  --color-ground-raised: var(--mp-ground-raised);
+  --color-ground-sunken: var(--mp-ground-sunken);
+  --color-surface: var(--mp-surface);
+  --color-surface-hover: var(--mp-surface-hover);
+  --color-overlay: var(--mp-overlay);
+
+  --color-hairline: var(--mp-hairline);
+  --color-hairline-strong: var(--mp-hairline-strong);
+
+  --color-fg: var(--mp-fg);
+  --color-fg-muted: var(--mp-fg-muted);
+  --color-fg-faint: var(--mp-fg-faint);
+  --color-fg-on-accent: var(--mp-fg-on-accent);
+
+  --color-accent: var(--mp-accent);
+  --color-accent-tint: var(--mp-accent-tint);
+  --color-accent-tint-strong: var(--mp-accent-tint-strong);
+  --color-accent-line: var(--mp-accent-line);
+
+  --color-danger: var(--mp-danger);
+  --color-cursor-outline: var(--mp-cursor-outline);
+
+  /* Kept for the handful of places still transitioning off the raw brand
+     names (e.g. any inline style outside Tailwind's reach). Prefer the
+     semantic tokens above in new code -- these two are dark-grounds-only
+     and light-grounds-only respectively, not interchangeable. Sourced from
+     tokens.css's fixed (non-flipping) constants, never a literal hex here
+     -- see that file's own doc comment and the stage 12 CI guard. */
   --color-ink: #0e0e0e;
-  --color-slate-teal: #123a4b;
-  --color-slate-teal-light: #3e7a92;
+  --color-slate-teal: var(--mp-accent-on-light);
+  --color-slate-teal-light: var(--mp-accent-on-dark);
   --color-paper: #f4f2ee;
+
+  --radius-xs: 7px;
+  --radius-sm: 9px;
+  --radius-md: 11px;
+  --radius-lg: 13px;
+  --radius-xl: 14px;
+
+  --shadow-float: var(--mp-shadow-float);
+  --shadow-sheet: var(--mp-shadow-sheet);
 
   --font-display: "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono-label: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Mono label sizes -- every uppercase, letter-spaced metadata label in
+     the app (session badges, provenance chips, status-bar hints) uses one
+     of these four, never an arbitrary size. See ui/Mono.tsx. */
+  --text-label-xs: 9px;
+  --text-label-sm: 10px;
+  --text-label: 11px;
+  --text-label-lg: 11.5px;
+
+  --text-body-sm: 12px;
+  --text-body: 13px;
+  --text-title: 20px;
+
+  --tracking-label: 0.05em;
+  --tracking-label-wide: 0.16em;
+}
+
+/* The leased-row gradient (Now column, dock) -- one accent tint bleeding
+   to transparent, reused wherever a row is actively held by a session.
+   A @utility rather than an inline style so it participates in the
+   `dark:` variant like everything else, and isn't duplicated per row
+   component. */
+@utility bg-lease {
+  background-image: linear-gradient(90deg, var(--mp-accent-tint-strong), transparent);
+}
+
+/* The one arrival animation in the whole app: a single 220ms scale-in,
+   nothing else moves ("motion on a surface you cannot click reads as
+   noise"). Used by ui/DiamondMark.tsx's `animateIn` prop and, once built,
+   the session strip's first card arriving when an agent connects -- see
+   the redesign plan's "earned, not requested" section for why an agent
+   *arriving* is the one case the design's "nothing animates unless an
+   agent actually moves" rule permits. Never reuse this for anything that
+   isn't a first-appearance -- re-triggering it on every refetch is exactly
+   the noise the rule exists to prevent. */
+@keyframes mp-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@utility animate-mp-scale-in {
+  animation: mp-scale-in 220ms ease-out;
 }
 
 :root {
@@ -31,10 +124,9 @@ body,
 }
 
 body {
-  @apply bg-paper text-ink antialiased;
-  @apply dark:bg-neutral-950 dark:text-neutral-100;
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  @apply bg-ground text-fg antialiased;
+  font-family: var(--font-display), -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica,
+    Arial, sans-serif;
 }
 
 * {
@@ -46,7 +138,7 @@ body {
   width: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  @apply bg-neutral-300 dark:bg-neutral-700;
+  background: var(--mp-hairline-strong);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-track {

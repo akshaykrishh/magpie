@@ -2,7 +2,8 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use magpie_capture::Capabilities;
 use magpie_core::{
-    AuditEntry, Blob, Capture, Project, ProjectOverview, Section, Session, Tag, Template,
+    AuditEntry, AuditEntryView, Blob, Capture, Project, ProjectOverview, Section, Session,
+    StreamRow, Tag, Template,
 };
 use serde::Deserialize;
 use tauri::{AppHandle, State};
@@ -52,6 +53,25 @@ pub fn list_stream(
 #[tauri::command]
 pub fn list_now(state: State<AppState>, project_id: Option<i64>) -> CmdResult<Vec<Capture>> {
     map_err(state.store.list_now(project_id))
+}
+
+/// The redesign's stream row: same filter/ordering contract as
+/// `list_stream`, joined against sources/blobs/projects/sessions so the
+/// UI gets provenance chips, the OCR-pending state, project names, merge
+/// counts, and session labels in one call instead of a per-row follow-up
+/// -- see `Store::list_stream_rows`'s doc comment for what this replaces.
+#[tauri::command]
+pub fn list_stream_rows(
+    state: State<AppState>,
+    filter: ProjectFilter,
+    limit: i64,
+    offset: i64,
+) -> CmdResult<Vec<StreamRow>> {
+    map_err(
+        state
+            .store
+            .list_stream_rows(filter.into_query(), limit, offset),
+    )
 }
 
 /// A prompt typed directly into the app, as opposed to something captured
@@ -364,6 +384,60 @@ pub fn list_audit(state: State<AppState>, limit: i64) -> CmdResult<Vec<AuditEntr
     map_err(state.store.list_audit(limit))
 }
 
+/// Same rows as `list_audit`, joined against sessions for the redesign's
+/// Activity overlay -- see `Store::list_audit_enriched`'s doc comment.
+#[tauri::command]
+pub fn list_audit_enriched(state: State<AppState>, limit: i64) -> CmdResult<Vec<AuditEntryView>> {
+    map_err(state.store.list_audit_enriched(limit))
+}
+
+/// The hand-back review sheet's "Send back" action -- see
+/// `Store::send_back_for_rework`. `actor` is the same fixed "you" string
+/// `revoke_lease` uses; magpie has no per-human identity concept yet.
+#[tauri::command]
+pub fn send_back_for_rework(state: State<AppState>, id: i64) -> CmdResult<Capture> {
+    map_err(state.store.send_back_for_rework(id, "you"))
+}
+
+/// A plain-text clipboard write with no capture behind it -- e.g. the
+/// review sheet's "Copy `git diff <commit>`" action, where the text is a
+/// command to paste into a terminal, not anything stored in the database.
+/// Distinct from `copy_capture_text`, which always resolves a specific
+/// capture's display text server-side.
+#[tauri::command]
+pub fn copy_text(app: AppHandle, text: String) -> CmdResult<()> {
+    app.clipboard().write_text(text).map_err(|e| e.to_string())
+}
+
+/// The Now column's `⌥⌫ REVOKE` chip -- a human releasing a lease at will,
+/// distinct from the automatic dead-pid sweep so the audit log records who
+/// actually did this. `actor` is a fixed string for now; magpie has no
+/// per-human identity concept yet (see `Store::revoke_lease`'s doc
+/// comment).
+#[tauri::command]
+pub fn revoke_lease(state: State<AppState>, id: i64) -> CmdResult<()> {
+    map_err(state.store.revoke_lease(id, "you"))
+}
+
+/// The Stream row's `⌥P PIN TO BRANCH` action -- the missing writer for a
+/// column `queue_take`/`queue_peek` have always honored. `branch: None`
+/// un-pins.
+#[tauri::command]
+pub fn pin_capture_to_branch(
+    state: State<AppState>,
+    id: i64,
+    branch: Option<String>,
+) -> CmdResult<Capture> {
+    map_err(state.store.pin_to_branch(id, branch.as_deref()))
+}
+
+/// The Unfiled lane's count badge, without fetching the whole list just to
+/// count it.
+#[tauri::command]
+pub fn count_unfiled(state: State<AppState>) -> CmdResult<i64> {
+    map_err(state.store.count_unfiled())
+}
+
 #[tauri::command]
 pub fn get_capture_blob(state: State<AppState>, capture_id: i64) -> CmdResult<Option<Blob>> {
     map_err(state.store.get_blob_for_capture(capture_id))
@@ -470,4 +544,46 @@ pub fn open_accessibility_settings(app: tauri::AppHandle) -> Result<(), String> 
         let _ = app;
         Ok(())
     }
+}
+
+/// ⌘K → Settings, and the settings tray item, share this rather than
+/// having a second window-management copy -- see `tray::show_settings_window`.
+#[tauri::command]
+pub fn show_settings_window(app: tauri::AppHandle) {
+    crate::tray::show_settings_window(&app);
+}
+
+/// Across's (⌘⌥K) one action: picking a row pins that project (`None` for
+/// Inbox clears the pin, mirroring `useProjectSignal`'s `setPin(null)`),
+/// then brings the main window forward and hides Across -- one round trip
+/// rather than the frontend calling the generic `set_setting` and this
+/// command separately, since "picked a destination" is a single user
+/// action even though it touches two different pieces of state.
+/// ⌘K's "Across all projects" entry -- the same path the ⌘⌥K global
+/// shortcut takes (see `across::toggle`), just reachable without leaving
+/// the keyboard-driven palette flow.
+#[tauri::command]
+pub fn toggle_across(app: tauri::AppHandle) {
+    crate::across::toggle(&app);
+}
+
+/// Escape / click-away's plain dismiss -- unlike `select_across_project`,
+/// nothing was picked, so no pin changes and the main window isn't
+/// brought forward.
+#[tauri::command]
+pub fn hide_across(app: tauri::AppHandle) {
+    crate::across::hide(&app);
+}
+
+#[tauri::command]
+pub fn select_across_project(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    project_id: Option<i64>,
+) -> CmdResult<()> {
+    let value = project_id.map(|id| id.to_string()).unwrap_or_default();
+    map_err(state.store.set_setting("pinned_project_id", &value))?;
+    crate::tray::show_main_window(&app);
+    crate::across::hide(&app);
+    Ok(())
 }

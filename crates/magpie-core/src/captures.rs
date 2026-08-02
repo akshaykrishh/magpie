@@ -37,19 +37,38 @@ pub(crate) fn capture_from_row(row: &Row) -> rusqlite::Result<Capture> {
         merged_into: row.get("merged_into")?,
         section_id: row.get("section_id")?,
         deleted_at: row.get("deleted_at")?,
+        session_id: row.get("session_id")?,
+        filed_confidence: row.get("filed_confidence")?,
     })
 }
 
 pub(crate) const CAPTURE_COLUMNS: &str =
     "id, kind, body, created_at, done_at, failed_reason, queue_pos, \
      project_id, branch, lease_session, lease_client, lease_pid, lease_at, lease_head_commit, \
-     handback_note, diff_stat, handback_at, source_id, merged_into, section_id, deleted_at";
+     handback_note, diff_stat, handback_at, source_id, merged_into, section_id, deleted_at, \
+     session_id, filed_confidence";
 
 impl Store {
     /// Capture something into the stream (Inbox: no project until assigned).
     /// Never auto-filed into Now -- see docs/design.md "one stream, one
     /// working set" for why that's a deliberate choice, not an omission.
+    /// Delegates to `capture_with_session` with no session -- the hotkey,
+    /// CLI, and typed-prompt paths all go through this, and none of them
+    /// have a session to attribute the capture to.
     pub fn capture(&self, body: &str, source: Option<NewSource>) -> Result<Capture> {
+        self.capture_with_session(body, source, None)
+    }
+
+    /// Like `capture`, but also records which MCP session produced it (see
+    /// migrations/0010_ui_provenance.sql's `captures.session_id`). Used by
+    /// magpie-mcp's `capture_add`, the only caller with a session to
+    /// attribute to.
+    pub fn capture_with_session(
+        &self,
+        body: &str,
+        source: Option<NewSource>,
+        session_id: Option<&str>,
+    ) -> Result<Capture> {
         self.with_conn(|conn| {
             let source_id = match source {
                 Some(s) => {
@@ -65,8 +84,8 @@ impl Store {
 
             let now = now_iso();
             conn.execute(
-                "INSERT INTO captures (body, created_at, source_id) VALUES (?1, ?2, ?3)",
-                params![body, now, source_id],
+                "INSERT INTO captures (body, created_at, source_id, session_id) VALUES (?1, ?2, ?3, ?4)",
+                params![body, now, source_id, session_id],
             )?;
             let id = conn.last_insert_rowid();
             get_capture_tx(conn, id)
@@ -284,6 +303,74 @@ impl Store {
         })
     }
 
+    /// Sets `project_id` and records *why* in one call -- `confidence` is
+    /// `"certain"` (MCP read an actual git remote, or a human chose it
+    /// explicitly) or `"guessed"` (the desktop app's recency guess,
+    /// confirmed by a tap). Unlike `assign_project`, `project_id` isn't
+    /// optional here: there's no honest confidence value for "unfiled",
+    /// so un-filing a capture still goes through `assign_project(id,
+    /// None)`. See migrations/0010_ui_provenance.sql.
+    pub fn file_capture(&self, id: i64, project_id: i64, confidence: &str) -> Result<Capture> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE captures SET project_id = ?1, filed_confidence = ?2
+                 WHERE id = ?3 AND deleted_at IS NULL",
+                params![project_id, confidence, id],
+            )?;
+            crate::projects::touch_project_active_tx(conn, project_id)?;
+            get_active_capture_tx(conn, id)
+        })
+    }
+
+    /// Sets or clears the branch a capture is pinned to -- the missing
+    /// writer for the `branch` column `queue_take`/`queue_peek` have
+    /// always honored (see migrations/0001_init.sql): a non-NULL branch
+    /// restricts which session can lease the item to ones on that branch
+    /// or worktree. `None` un-pins it back to any-branch.
+    pub fn pin_to_branch(&self, id: i64, branch: Option<&str>) -> Result<Capture> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE captures SET branch = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+                params![branch, id],
+            )?;
+            get_active_capture_tx(conn, id)
+        })
+    }
+
+    /// How many captures are unfiled (Inbox: `project_id IS NULL`),
+    /// excluding soft-deleted rows and session digests (a digest is never
+    /// "unfiled" in any meaningful sense -- it's not a user's capture
+    /// waiting to be filed). Backs the Unfiled lane's count badge without
+    /// requiring the whole list just to count it.
+    pub fn count_unfiled(&self) -> Result<i64> {
+        self.with_conn(|conn| {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM captures
+                 WHERE project_id IS NULL AND deleted_at IS NULL AND kind = 'capture'",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+    }
+
+    /// How many of a scope's stream captures haven't been promoted to Now
+    /// -- feeds the Resume card's "11 unpromoted captures waiting" and
+    /// `ProjectOverview.unpromoted_count`. `project_id: None` scopes to
+    /// Inbox specifically (matching `list_now`'s convention), not
+    /// "everywhere" -- callers wanting a global count call this once per
+    /// scope, same as every other per-project rollup in this crate.
+    pub fn count_unpromoted(&self, project_id: Option<i64>) -> Result<i64> {
+        self.with_conn(|conn| {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM captures
+                 WHERE project_id IS ?1 AND queue_pos IS NULL
+                   AND deleted_at IS NULL AND kind = 'capture'",
+                params![project_id],
+                |r| r.get(0),
+            )?)
+        })
+    }
+
     pub fn assign_capture_section(&self, id: i64, section_id: Option<i64>) -> Result<Capture> {
         self.with_conn(|conn| {
             if let Some(section_id) = section_id {
@@ -411,7 +498,8 @@ pub(crate) fn get_capture_tx(conn: &rusqlite::Connection, id: i64) -> Result<Cap
 /// Do NOT use this for `get_capture`, `restore_capture`, or anywhere else a
 /// caller legitimately needs to see a soft-deleted row's current state.
 pub(crate) fn get_active_capture_tx(conn: &rusqlite::Connection, id: i64) -> Result<Capture> {
-    let sql = format!("SELECT {CAPTURE_COLUMNS} FROM captures WHERE id = ?1 AND deleted_at IS NULL");
+    let sql =
+        format!("SELECT {CAPTURE_COLUMNS} FROM captures WHERE id = ?1 AND deleted_at IS NULL");
     conn.query_row(&sql, params![id], capture_from_row)
         .optional()?
         .ok_or(Error::CaptureNotFound(id))
@@ -784,7 +872,9 @@ mod tests {
             })
             .unwrap();
 
-        let purged = store.purge_expired_captures("2020-01-01T00:00:00Z").unwrap();
+        let purged = store
+            .purge_expired_captures("2020-01-01T00:00:00Z")
+            .unwrap();
         assert_eq!(purged, 1);
         assert!(store.get_capture(old.id).is_err());
         assert!(store.get_capture(recent.id).is_ok());
@@ -852,7 +942,10 @@ mod tests {
     fn capture_display_text_falls_back_to_ocr_then_placeholder() {
         let store = Store::open_in_memory().unwrap();
         let text_capture = store.capture("hello", None).unwrap();
-        assert_eq!(store.capture_display_text(text_capture.id).unwrap(), "hello");
+        assert_eq!(
+            store.capture_display_text(text_capture.id).unwrap(),
+            "hello"
+        );
 
         let shot = store
             .capture_screenshot("/tmp/shot.png", "image/png", None, None, None)
@@ -864,6 +957,89 @@ mod tests {
 
         let blob = store.get_blob_for_capture(shot.id).unwrap().unwrap();
         store.set_blob_ocr_text(blob.id, "receipt total").unwrap();
-        assert_eq!(store.capture_display_text(shot.id).unwrap(), "receipt total");
+        assert_eq!(
+            store.capture_display_text(shot.id).unwrap(),
+            "receipt total"
+        );
+    }
+
+    #[test]
+    fn capture_with_session_records_the_session_capture_alone_does_not() {
+        let store = Store::open_in_memory().unwrap();
+        let plain = store.capture("typed by a human", None).unwrap();
+        assert_eq!(plain.session_id, None);
+
+        let from_agent = store
+            .capture_with_session("agent wrote this", None, Some("sess-1"))
+            .unwrap();
+        assert_eq!(from_agent.session_id.as_deref(), Some("sess-1"));
+    }
+
+    #[test]
+    fn file_capture_sets_project_and_confidence_together() {
+        let store = Store::open_in_memory().unwrap();
+        let proj = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        let c = store.capture("something", None).unwrap();
+        assert_eq!(c.filed_confidence, None);
+
+        let filed = store.file_capture(c.id, proj.id, "certain").unwrap();
+        assert_eq!(filed.project_id, Some(proj.id));
+        assert_eq!(filed.filed_confidence.as_deref(), Some("certain"));
+    }
+
+    #[test]
+    fn file_capture_touches_project_recency() {
+        let store = Store::open_in_memory().unwrap();
+        let old = store
+            .get_or_create_project("old", Some("git@github.com:x/old.git"), None)
+            .unwrap();
+        // Created after `old`, so it's already the more recent one --
+        // re-filing into `old` below must overtake it, proving
+        // `file_capture` actually touches recency rather than just
+        // setting the column. The binding itself is unused past creation;
+        // its only job is the side effect of existing more recently.
+        let _target = store
+            .get_or_create_project("target", Some("git@github.com:x/target.git"), None)
+            .unwrap();
+        let c = store.capture("something", None).unwrap();
+        store.file_capture(c.id, old.id, "guessed").unwrap();
+
+        let by_recency = store.list_projects_by_recency(1).unwrap();
+        assert_eq!(by_recency[0].id, old.id);
+    }
+
+    #[test]
+    fn pin_to_branch_sets_and_clears() {
+        let store = Store::open_in_memory().unwrap();
+        let c = store.capture("something", None).unwrap();
+        assert_eq!(c.branch, None);
+
+        let pinned = store.pin_to_branch(c.id, Some("feat/x")).unwrap();
+        assert_eq!(pinned.branch.as_deref(), Some("feat/x"));
+
+        let unpinned = store.pin_to_branch(c.id, None).unwrap();
+        assert_eq!(unpinned.branch, None);
+    }
+
+    #[test]
+    fn count_unfiled_excludes_filed_deleted_and_digest_rows() {
+        let store = Store::open_in_memory().unwrap();
+        let proj = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+
+        let unfiled_1 = store.capture("stays unfiled", None).unwrap();
+        let _unfiled_2 = store.capture("also stays unfiled", None).unwrap();
+        let filed = store.capture("gets filed", None).unwrap();
+        store.assign_project(filed.id, Some(proj.id)).unwrap();
+        let deleted = store.capture("gets deleted", None).unwrap();
+        store.soft_delete_capture(deleted.id).unwrap();
+
+        assert_eq!(store.count_unfiled().unwrap(), 2);
+
+        store.assign_project(unfiled_1.id, Some(proj.id)).unwrap();
+        assert_eq!(store.count_unfiled().unwrap(), 1);
     }
 }

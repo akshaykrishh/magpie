@@ -18,3 +18,11 @@ export const SECTIONS_CHANGED_EVENT = "sections:changed";
 // used inline elsewhere) since nothing new landed, an existing capture just
 // became searchable. Payload is the capture's id.
 export const CAPTURE_UPDATED_EVENT = "capture:updated";
+
+// Fired by src/lib/theme.ts whenever the appearance preference changes
+// (System/Light/Dark), so every open window applies `.dark` in lockstep
+// rather than only the window the change was made in. Payload is the
+// `ThemePreference` that was just set -- see theme.ts for `resolveMode`,
+// which turns this (plus the OS setting, for "system") into the actual
+// mode a window should render.
+export const THEME_CHANGED_EVENT = "theme:changed";

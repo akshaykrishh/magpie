@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import type { Capture, Template } from "@/lib/types";
 
-export function RecentlyDeletedView() {
+export function TrashSheet() {
   const [captures, setCaptures] = useState<Capture[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
 
@@ -56,7 +56,7 @@ export function RecentlyDeletedView() {
   // + Undo replaces confirm() everywhere else, and this codebase has none).
   // Permanent delete is the one place here with no further undo, but it's
   // already reached through two deliberate steps -- the item was already
-  // soft-deleted once, and this view is a dedicated destination for exactly
+  // soft-deleted once, and this sheet is a dedicated destination for exactly
   // this action -- rather than a single misclick away from data loss the way
   // an unprotected top-level delete button would be. The button itself is
   // styled distinctly (red, separated from Restore) so it doesn't read as a
@@ -79,16 +79,18 @@ export function RecentlyDeletedView() {
     }
   }
 
-  if (captures.length === 0 && templates.length === 0) {
-    return (
-      <p className="px-3 py-6 text-center text-sm text-neutral-400 dark:text-neutral-600">
-        Nothing recently deleted.
-      </p>
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-4 overflow-y-auto p-3">
+    <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto p-4">
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+        Recently Deleted
+      </h2>
+
+      {captures.length === 0 && templates.length === 0 && (
+        <p className="px-1 text-sm text-neutral-400 dark:text-neutral-600">
+          Nothing recently deleted.
+        </p>
+      )}
+
       {captures.length > 0 && (
         <div>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-400">

@@ -44,17 +44,20 @@ pub fn set_hotkey(
     kind: String,
     combo: String,
 ) -> CmdResult<()> {
-    let has_modifier = ["Command", "Control", "Alt", "Shift", "Cmd", "Ctrl", "Option"]
-        .iter()
-        .any(|m| combo.contains(m));
+    let has_modifier = [
+        "Command", "Control", "Alt", "Shift", "Cmd", "Ctrl", "Option",
+    ]
+    .iter()
+    .any(|m| combo.contains(m));
     if !has_modifier {
         return Err(format!(
             "\"{combo}\" has no modifier key -- binding a bare key would break normal typing"
         ));
     }
 
-    let new_shortcut: Shortcut =
-        combo.parse().map_err(|e| format!("invalid shortcut syntax: {e}"))?;
+    let new_shortcut: Shortcut = combo
+        .parse()
+        .map_err(|e| format!("invalid shortcut syntax: {e}"))?;
 
     let setting_key = match kind.as_str() {
         "capture" => "capture_hotkey",
@@ -107,9 +110,9 @@ pub fn set_hotkey(
     // try to re-register it again.
     if let Err(e) = gs.register(new_shortcut) {
         return Err(match gs.register(old_shortcut) {
-            Ok(()) => format!(
-                "could not register \"{combo}\": {e} (still using \"{previous_combo}\")"
-            ),
+            Ok(()) => {
+                format!("could not register \"{combo}\": {e} (still using \"{previous_combo}\")")
+            }
             Err(rollback_err) => {
                 eprintln!(
                     "set_hotkey: after failing to register \"{combo}\" ({e}), restoring \
@@ -127,5 +130,52 @@ pub fn set_hotkey(
     *current = new_shortcut;
     drop(current);
 
-    state.store.set_setting(setting_key, &combo).map_err(|e| e.to_string())
+    state
+        .store
+        .set_setting(setting_key, &combo)
+        .map_err(|e| e.to_string())
+}
+
+/// Every UI preference key the frontend is allowed to read/write through
+/// `get_setting`/`set_setting`. `Store::get_setting`/`set_setting` are a
+/// generic KV pair over the `settings` table -- deliberately NOT exposed
+/// to IPC as-is, the same way `set_hotkey` validates `kind` rather than
+/// taking a raw column name. This allowlist is also the one place that
+/// documents the whole preference surface: add a key here, and it exists.
+///
+/// `capture_hotkey`/`screenshot_hotkey` are intentionally excluded --
+/// those are written only through the validated `set_hotkey` path above,
+/// never through this generic one.
+const SETTING_KEYS: &[&str] = &[
+    "theme",
+    "now_cap",
+    "quiet_until",
+    "toast_capture_count",
+    "clipboard_only_capture_count",
+    "permission_offer_dismissed",
+    "onboarding_complete",
+    "pinned_project_id",
+];
+
+fn check_setting_key(key: &str) -> CmdResult<()> {
+    if SETTING_KEYS.contains(&key) {
+        Ok(())
+    } else {
+        Err(format!("\"{key}\" is not a recognized setting"))
+    }
+}
+
+#[tauri::command]
+pub fn get_setting(state: State<AppState>, key: String) -> CmdResult<Option<String>> {
+    check_setting_key(&key)?;
+    state.store.get_setting(&key).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_setting(state: State<AppState>, key: String, value: String) -> CmdResult<()> {
+    check_setting_key(&key)?;
+    state
+        .store
+        .set_setting(&key, &value)
+        .map_err(|e| e.to_string())
 }

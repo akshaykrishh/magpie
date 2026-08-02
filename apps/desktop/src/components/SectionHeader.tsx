@@ -34,8 +34,8 @@ export function SectionHeader({ section, onRename, onDelete, dragHandleProps }: 
             if (draft.trim() && draft !== section.name) onRename(draft.trim());
           }}
           onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-          className="rounded border border-slate-teal bg-transparent px-1 text-xs font-semibold
-                     uppercase tracking-wide text-neutral-500 outline-none dark:text-neutral-400"
+          className="rounded border border-accent-line bg-transparent px-1 text-xs font-semibold
+                     uppercase tracking-wide text-fg-muted outline-none"
         />
       ) : (
         <h3

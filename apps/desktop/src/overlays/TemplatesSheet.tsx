@@ -19,51 +19,21 @@ import { Pencil, Play, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { SECTIONS_CHANGED_EVENT } from "@/lib/events";
+import { afterIdFromDragEnd, groupBySection } from "@/lib/grouping";
 import type { Project, Section, Template } from "@/lib/types";
-import { MarkdownBody } from "./MarkdownBody";
-import { SectionHeader } from "./SectionHeader";
+import { MarkdownBody } from "@/components/MarkdownBody";
+import { SectionHeader } from "@/components/SectionHeader";
 
-interface TemplatesPanelProps {
+interface TemplatesSheetProps {
   onInstantiated: () => void;
   onShowUndo: (message: string, onUndo: () => void) => void;
 }
 
-// Groups templates that carry a `section_id` into per-section buckets (in
-// their existing order -- grouping never introduces a second ordering
-// dimension) plus a leftover bucket for templates with no section. Mirrors
-// the identically-named helper in App.tsx/NowList.tsx; kept as a local copy
-// here since those are themselves locally-scoped per-file, not a shared
-// export.
-function groupBySection<T extends { section_id: number | null }>(items: T[]) {
-  const bySection = new Map<number, T[]>();
-  const unsectioned: T[] = [];
-  for (const item of items) {
-    if (item.section_id === null) unsectioned.push(item);
-    else bySection.set(item.section_id, [...(bySection.get(item.section_id) ?? []), item]);
-  }
-  return { bySection, unsectioned };
-}
-
-// Shared by the section-header drag-to-reorder below -- computes "the id
-// this element should now sit immediately after" from a plain DragEndEvent
-// plus the local ordered array being rendered. `undefined` means "no-op"
-// (dropped on itself, or off-target). Mirrors NowList.tsx's identically-named
-// helper.
-function afterIdFromDragEnd<T extends { id: number }>(
-  localOrder: T[],
-  event: DragEndEvent,
-): number | null | undefined {
-  const { active, over } = event;
-  if (!over || active.id === over.id) return undefined;
-
-  const activeIndex = localOrder.findIndex((c) => c.id === active.id);
-  const overIndex = localOrder.findIndex((c) => c.id === over.id);
-  if (activeIndex === -1 || overIndex === -1) return undefined;
-
-  return activeIndex < overIndex ? localOrder[overIndex].id : (localOrder[overIndex - 1]?.id ?? null);
-}
-
-export function TemplatesPanel({ onInstantiated, onShowUndo }: TemplatesPanelProps) {
+/// The authoring half of what used to be the Templates tab -- see
+/// components/TemplateRunList.tsx for the other half (a compact "run one
+/// of these" list rendered in the Now column's empty state). Reachable
+/// now via ⌘K → Manage templates, since there's no tab bar to hold it.
+export function TemplatesSheet({ onInstantiated, onShowUndo }: TemplatesSheetProps) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
@@ -184,7 +154,7 @@ export function TemplatesPanel({ onInstantiated, onShowUndo }: TemplatesPanelPro
   // groups render above the plain list, each in the section's own
   // fractional `position` order; templates without a section render exactly
   // as they do today, with no "Unsectioned" header.
-  const { bySection, unsectioned } = groupBySection(templates);
+  const { bySection, unsectioned } = groupBySection(templates, (t) => t.section_id);
   const visibleSections = sections.filter((s) => bySection.has(s.id));
 
   function handleSectionDragEnd(event: DragEndEvent) {
@@ -194,7 +164,7 @@ export function TemplatesPanel({ onInstantiated, onShowUndo }: TemplatesPanelPro
   }
 
   return (
-    <div className="flex h-full flex-col gap-3 overflow-y-auto p-3">
+    <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto p-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
           Templates
@@ -215,14 +185,14 @@ export function TemplatesPanel({ onInstantiated, onShowUndo }: TemplatesPanelPro
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Title"
-            className="rounded-md border border-neutral-200 bg-transparent px-2 py-1 text-sm focus:border-slate-teal focus:outline-none dark:border-neutral-700"
+            className="rounded-md border border-neutral-200 bg-transparent px-2 py-1 text-sm focus:border-accent-line focus:outline-none dark:border-neutral-700"
           />
           <textarea
             value={body}
             onChange={(e) => setBody(e.target.value)}
             placeholder="Prompt body"
             rows={4}
-            className="rounded-md border border-neutral-200 bg-transparent px-2 py-1 text-sm focus:border-slate-teal focus:outline-none dark:border-neutral-700"
+            className="rounded-md border border-neutral-200 bg-transparent px-2 py-1 text-sm focus:border-accent-line focus:outline-none dark:border-neutral-700"
           />
           <div className="flex justify-end gap-2">
             <button
@@ -459,7 +429,7 @@ function TemplateCard({
                 value={values[name] ?? variableMeta[name]?.default ?? ""}
                 onChange={(e) => setValues((prev) => ({ ...prev, [name]: e.target.value }))}
                 placeholder={name}
-                className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs focus:border-slate-teal focus:outline-none dark:border-neutral-700 dark:bg-neutral-900"
+                className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs focus:border-accent-line focus:outline-none dark:border-neutral-700 dark:bg-neutral-900"
               />
             </label>
           ))}
@@ -480,7 +450,7 @@ function TemplateCard({
           ))}
         </select>
         {/* "Move to Section" affordance -- functional, not as elaborate as
-            CaptureItem's full context menu (see docs/superpowers/specs/
+            CaptureRow's full context menu (see docs/superpowers/specs/
             2026-07-31-capture-list-v2-design.md's "Context menu"). A plain
             select is enough here since a template only ever needs to change
             its single section membership, not the richer action set
