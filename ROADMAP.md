@@ -33,8 +33,7 @@ Usable today, on `main` unless noted:
   main window rebuilt around a session strip and one overlay stack instead
   of a tab bar, hold-to-aim (hold the capture hotkey to redirect a filing
   guess instead of only confirm-or-ignore), and Across (⌘⌥K), the
-  cross-project "what needs a look" rollup. Complete on `redesign/slate`,
-  PR open against `main`.
+  cross-project "what needs a look" rollup.
 
 ## Next
 
