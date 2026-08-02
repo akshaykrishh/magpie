@@ -88,6 +88,13 @@ EOF
 assert_exit "CHANGELOG.md missing Unreleased heading fails" 1
 
 make_fixture
+cat > "$fixture/Cargo.toml" <<'EOF'
+[workspace.package]
+edition = "2021"
+EOF
+assert_exit "Cargo.toml missing version key fails" 1
+
+make_fixture
 assert_exit "tag matches Cargo.toml version, changelog section filled: passes" 0 v0.1.0
 
 make_fixture
