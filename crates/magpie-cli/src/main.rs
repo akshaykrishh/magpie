@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -5,6 +6,7 @@ use clap::{Parser, Subcommand};
 use magpie_core::Store;
 
 mod pack_source;
+mod seed;
 
 #[derive(Parser)]
 #[command(name = "magpie", about = "Capture queue for AI-assisted work", version)]
@@ -55,6 +57,27 @@ enum Command {
     /// Run the MCP server over stdio (what an agent host actually spawns)
     ServeMcp,
 
+    /// Write a fixture database at one of five data-density tiers (zero,
+    /// sparse, working, dense, degenerate) -- for verifying the redesign's
+    /// UI actually holds up across data density, not just at whatever's on
+    /// this machine right now. See crates/magpie-cli/src/seed.rs.
+    ///
+    /// Never touches the real database: with no --db, writes to a
+    /// dedicated `seed-<tier>.db` next to the real one, never magpie.db
+    /// itself. Point the desktop app at the result with, e.g.:
+    ///   MAGPIE_DB_PATH=<printed path> pnpm tauri dev
+    Seed {
+        #[arg(long, value_enum)]
+        tier: seed::Tier,
+        /// Write somewhere other than the default seed-<tier>.db location.
+        /// Overwriting an existing file at an explicit --db requires
+        /// --force.
+        #[arg(long)]
+        db: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+
     /// Prompt packs -- shared, git-hosted collections of templates. Named
     /// as its own subcommand group rather than reusing `add` (as sketched
     /// in the original design doc) since that name was already taken by
@@ -81,6 +104,25 @@ enum PackCommand {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // `seed` is handled before the default database is ever opened -- it
+    // resolves and opens its OWN path (never the real default, see
+    // seed::resolve_db_path), and every other branch below opens the real
+    // default unconditionally. If seed's handling lived down in the match
+    // like everything else, just running `magpie seed ...` would still
+    // create/touch the real magpie.db as a side effect of the `Store::open`
+    // two lines below, silently undermining the "never touches the real
+    // database" guarantee seed exists to provide. Matched by reference
+    // (not `cli.command` by value) so `cli.command` is still available for
+    // the exhaustive match below on every other branch.
+    if let Command::Seed { tier, db, force } = &cli.command {
+        let db_path = seed::resolve_db_path(*tier, db.clone(), *force)?;
+        seed::run(*tier, &db_path)?;
+        println!("seeded {db_path:?}");
+        println!("point the desktop app at it with:");
+        println!("  MAGPIE_DB_PATH={} pnpm tauri dev", db_path.display());
+        return Ok(());
+    }
 
     let db_path = magpie_core::default_db_path()
         .context("could not determine a data directory for this platform")?;
@@ -154,6 +196,8 @@ async fn main() -> Result<()> {
         Command::ServeMcp => {
             magpie_mcp::serve_stdio(Arc::new(store)).await?;
         }
+
+        Command::Seed { .. } => unreachable!("handled above, before the default database opens"),
 
         Command::Pack(PackCommand::Add { source }) => {
             let (source_url, parsed) = pack_source::fetch(&source)?;

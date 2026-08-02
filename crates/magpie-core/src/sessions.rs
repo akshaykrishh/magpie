@@ -21,12 +21,41 @@ fn session_from_row(row: &Row) -> rusqlite::Result<Session> {
         handback_count: row.get("handback_count")?,
         captures_during_session: row.get("captures_during_session")?,
         unpromoted_at_end: row.get("unpromoted_at_end")?,
+        ordinal: row.get("ordinal")?,
     })
 }
 
 const SESSION_COLUMNS: &str = "id, client, pid, project_id, branch, started_at, \
      last_active_at, ended_at, leased_count, completed_count, failed_count, handback_count, \
-     captures_during_session, unpromoted_at_end";
+     captures_during_session, unpromoted_at_end, ordinal";
+
+/// The smallest positive ordinal not already held by a live session in
+/// `project_id`'s scope (NULL normalized the same way the partial unique
+/// index does, via `coalesce(..., -1)`) -- so `S1`/`S2` stay small and
+/// stable rather than growing forever, and a freed slot (a session ending)
+/// is reused by the next one to connect. See
+/// migrations/0010_ui_provenance.sql for why reuse is the right call here.
+fn next_ordinal_tx(conn: &rusqlite::Connection, project_id: Option<i64>) -> rusqlite::Result<i64> {
+    let mut stmt = conn.prepare(
+        "SELECT ordinal FROM sessions
+         WHERE coalesce(project_id, -1) = coalesce(?1, -1)
+           AND ended_at IS NULL AND ordinal IS NOT NULL
+         ORDER BY ordinal ASC",
+    )?;
+    let used: Vec<i64> = stmt
+        .query_map(params![project_id], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let mut candidate = 1;
+    for o in used {
+        if o == candidate {
+            candidate += 1;
+        } else if o > candidate {
+            break;
+        }
+    }
+    Ok(candidate)
+}
 
 impl Store {
     /// Records a new MCP connection -- called once, at connection time, by
@@ -34,6 +63,11 @@ impl Store {
     /// `clientInfo` handshake result isn't available until the first tool
     /// call resolves it (see `touch_session_active`), not at connection
     /// time.
+    ///
+    /// Runs inside `BEGIN IMMEDIATE` (like `queue_take`) so two sessions
+    /// connecting to the same project at nearly the same moment can't both
+    /// compute the same "smallest free ordinal" and collide on the unique
+    /// index -- SQLite serializes the writers instead.
     pub fn create_session(
         &self,
         id: &str,
@@ -41,14 +75,18 @@ impl Store {
         project_id: Option<i64>,
         branch: Option<&str>,
     ) -> Result<Session> {
-        self.with_conn(|conn| {
+        self.with_conn_mut(|conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let ordinal = next_ordinal_tx(&tx, project_id)?;
             let now = now_iso();
-            conn.execute(
-                "INSERT INTO sessions (id, pid, project_id, branch, started_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![id, pid, project_id, branch, now],
+            tx.execute(
+                "INSERT INTO sessions (id, pid, project_id, branch, started_at, ordinal)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![id, pid, project_id, branch, now, ordinal],
             )?;
-            get_session_tx(conn, id)
+            let session = get_session_tx(&tx, id)?;
+            tx.commit()?;
+            Ok(session)
         })
     }
 
@@ -138,6 +176,48 @@ impl Store {
             let mut stmt = conn.prepare(&sql)?;
             let filter_on = project_id.is_some();
             let rows = stmt.query_map(params![filter_on as i64, project_id], session_from_row)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
+    /// How many real (non-digest) captures have landed since `since` --
+    /// the same window `end_session` uses to compute `captures_during`,
+    /// exposed here for the desktop app to synthesize an S0 "session" card
+    /// for the human's own use of the app, from its own process-start time
+    /// rather than a stored `sessions` row (see the redesign plan's stage 7:
+    /// a real row would drop a digest capture into the stream on every
+    /// quit). System-wide, not scoped to a project, matching
+    /// `end_session`'s own query.
+    pub fn count_captures_since(&self, since: &str) -> Result<i64> {
+        self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM captures WHERE created_at >= ?1 AND kind = 'capture'",
+                params![since],
+                |r| r.get(0),
+            )
+            .map_err(Into::into)
+        })
+    }
+
+    /// The most-captured-from source apps since `since`, most-frequent
+    /// first -- same synthesized-S0 use case as `count_captures_since`.
+    /// Captures with no resolved source (clipboard-only mode, or a source
+    /// magpie couldn't identify) are excluded rather than counted under a
+    /// fabricated "Unknown" label.
+    pub fn top_source_apps_since(&self, since: &str, limit: i64) -> Result<Vec<(String, i64)>> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT s.app_name, COUNT(*) as n
+                 FROM captures c
+                 JOIN sources s ON s.id = c.source_id
+                 WHERE c.created_at >= ?1 AND c.kind = 'capture' AND s.app_name IS NOT NULL
+                 GROUP BY s.app_name
+                 ORDER BY n DESC, s.app_name ASC
+                 LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![since, limit], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
     }
@@ -384,6 +464,70 @@ mod tests {
     }
 
     #[test]
+    fn count_captures_since_counts_only_real_captures_in_the_window() {
+        let store = Store::open_in_memory().unwrap();
+        let before = crate::db::now_iso();
+        store.capture("first", None).unwrap();
+        store.capture("second", None).unwrap();
+        // A session digest is `kind = 'session_digest'`, not `'capture'` --
+        // must not be counted alongside real captures.
+        store.create_session("sess-1", 111, None, None).unwrap();
+        store.end_session("sess-1").unwrap();
+
+        assert_eq!(store.count_captures_since(&before).unwrap(), 2);
+    }
+
+    #[test]
+    fn count_captures_since_excludes_captures_before_the_window() {
+        let store = Store::open_in_memory().unwrap();
+        store.capture("too early", None).unwrap();
+        let cutoff = crate::db::now_iso();
+
+        assert_eq!(store.count_captures_since(&cutoff).unwrap(), 0);
+    }
+
+    #[test]
+    fn top_source_apps_since_ranks_by_frequency_and_excludes_unknown_source() {
+        let store = Store::open_in_memory().unwrap();
+        let before = crate::db::now_iso();
+        store
+            .capture(
+                "a",
+                Some(crate::captures::NewSource {
+                    app_name: Some("Cursor".into()),
+                    ..Default::default()
+                }),
+            )
+            .unwrap();
+        store
+            .capture(
+                "b",
+                Some(crate::captures::NewSource {
+                    app_name: Some("Terminal".into()),
+                    ..Default::default()
+                }),
+            )
+            .unwrap();
+        store
+            .capture(
+                "c",
+                Some(crate::captures::NewSource {
+                    app_name: Some("Cursor".into()),
+                    ..Default::default()
+                }),
+            )
+            .unwrap();
+        // No source at all -- must not appear as a fabricated "Unknown" entry.
+        store.capture("d", None).unwrap();
+
+        let top = store.top_source_apps_since(&before, 10).unwrap();
+        assert_eq!(
+            top,
+            vec![("Cursor".to_string(), 2), ("Terminal".to_string(), 1)]
+        );
+    }
+
+    #[test]
     fn digest_is_invisible_to_queue_take_and_queue_peek() {
         let store = Store::open_in_memory().unwrap();
         let proj = store
@@ -410,5 +554,107 @@ mod tests {
             .queue_take(Some(proj.id), None, &identity)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn ordinals_are_assigned_sequentially_per_project() {
+        let store = Store::open_in_memory().unwrap();
+        let proj = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+
+        let s1 = store
+            .create_session("sess-1", 100, Some(proj.id), None)
+            .unwrap();
+        let s2 = store
+            .create_session("sess-2", 200, Some(proj.id), None)
+            .unwrap();
+        assert_eq!(s1.ordinal, Some(1));
+        assert_eq!(s2.ordinal, Some(2));
+    }
+
+    #[test]
+    fn ordinals_are_scoped_per_project_not_global() {
+        let store = Store::open_in_memory().unwrap();
+        let a = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        let b = store
+            .get_or_create_project("b", Some("git@github.com:x/b.git"), None)
+            .unwrap();
+
+        let s1 = store
+            .create_session("sess-1", 100, Some(a.id), None)
+            .unwrap();
+        // A live session already holds ordinal 1 in project `a`, but `b`
+        // is a different scope -- its first session also starts at 1
+        // rather than continuing a single global counter.
+        let s2 = store
+            .create_session("sess-2", 200, Some(b.id), None)
+            .unwrap();
+        assert_eq!(s1.ordinal, Some(1));
+        assert_eq!(s2.ordinal, Some(1));
+
+        // The Inbox scope (project_id None) is its own scope too.
+        let s3 = store.create_session("sess-3", 300, None, None).unwrap();
+        assert_eq!(s3.ordinal, Some(1));
+    }
+
+    #[test]
+    fn ending_a_session_frees_its_ordinal_for_reuse() {
+        let store = Store::open_in_memory().unwrap();
+        let proj = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+
+        store
+            .create_session("sess-1", 100, Some(proj.id), None)
+            .unwrap();
+        let s2 = store
+            .create_session("sess-2", 200, Some(proj.id), None)
+            .unwrap();
+        assert_eq!(s2.ordinal, Some(2));
+
+        // sess-1 (ordinal 1) ends -- its slot is now free.
+        store.end_session("sess-1").unwrap();
+
+        let s3 = store
+            .create_session("sess-3", 300, Some(proj.id), None)
+            .unwrap();
+        assert_eq!(
+            s3.ordinal,
+            Some(1),
+            "a freed ordinal is reused by the next session to connect, \
+             not skipped in favor of an ever-growing counter"
+        );
+
+        // sess-2 (still live, ordinal 2) is untouched by sess-3 connecting.
+        let s2_again = store.get_session("sess-2").unwrap();
+        assert_eq!(s2_again.ordinal, Some(2));
+    }
+
+    #[test]
+    fn ordinal_fills_the_lowest_gap_not_just_the_end() {
+        let store = Store::open_in_memory().unwrap();
+        let proj = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+
+        store
+            .create_session("sess-1", 100, Some(proj.id), None)
+            .unwrap(); // ordinal 1
+        store
+            .create_session("sess-2", 200, Some(proj.id), None)
+            .unwrap(); // ordinal 2
+        store
+            .create_session("sess-3", 300, Some(proj.id), None)
+            .unwrap(); // ordinal 3
+
+        store.end_session("sess-2").unwrap(); // frees ordinal 2, a gap
+
+        let s4 = store
+            .create_session("sess-4", 400, Some(proj.id), None)
+            .unwrap();
+        assert_eq!(s4.ordinal, Some(2), "the lowest free slot, not 4");
     }
 }

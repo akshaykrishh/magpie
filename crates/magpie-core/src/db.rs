@@ -24,6 +24,16 @@ pub fn purge_cutoff(days: i64) -> String {
         .expect("RFC3339 formatting of a valid OffsetDateTime cannot fail")
 }
 
+/// `now + hours`, RFC3339 -- for the tray's "Quiet for an hour", which
+/// writes this into the `quiet_until` setting (compared lexicographically
+/// against `now_iso()` by `capture_flow.rs`'s `is_quiet_now`, same
+/// string-sort trick `purge_cutoff` relies on).
+pub fn iso_plus_hours(hours: i64) -> String {
+    (OffsetDateTime::now_utc() + time::Duration::hours(hours))
+        .format(&Rfc3339)
+        .expect("RFC3339 formatting of a valid OffsetDateTime cannot fail")
+}
+
 const MIGRATIONS: &[(&str, &str)] = &[
     ("0001_init", include_str!("../migrations/0001_init.sql")),
     (
@@ -55,6 +65,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0009_settings",
         include_str!("../migrations/0009_settings.sql"),
     ),
+    (
+        "0010_ui_provenance",
+        include_str!("../migrations/0010_ui_provenance.sql"),
+    ),
 ];
 
 /// `~/Library/Application Support/magpie/magpie.db` on macOS,
@@ -63,14 +77,31 @@ const MIGRATIONS: &[(&str, &str)] = &[
 /// "own your data through transparency" -- so anyone can find and open it
 /// with plain `sqlite3`. Shared by every process that opens a `Store`
 /// (GUI, CLI, MCP server), which is what makes them see the same data.
+///
+/// `MAGPIE_DB_PATH`, if set, overrides this entirely -- the mechanism that
+/// lets `magpie seed --tier <t>` produce a fixture database and then have
+/// `MAGPIE_DB_PATH=<path> pnpm tauri dev` point the real desktop app at it,
+/// without ever touching the real default path. Not documented as a user-
+/// facing setting; it's a developer/testing knob, checked before the
+/// platform default so it works identically for the GUI, the CLI, and the
+/// MCP server (whichever one launches first still sees the same override).
 pub fn default_db_path() -> Option<std::path::PathBuf> {
+    if let Ok(over) = std::env::var("MAGPIE_DB_PATH") {
+        return Some(std::path::PathBuf::from(over));
+    }
     dirs::data_dir().map(|d| d.join("magpie").join("magpie.db"))
 }
 
 /// Where screenshot blobs are stored on disk -- a sibling of the database
 /// rather than inside it, since `blobs.path` just needs to point somewhere
 /// stable; SQLite has no business holding image bytes itself.
+///
+/// `MAGPIE_BLOBS_DIR` overrides this the same way `MAGPIE_DB_PATH` overrides
+/// `default_db_path` -- see that function's doc comment.
 pub fn default_blobs_dir() -> Option<std::path::PathBuf> {
+    if let Ok(over) = std::env::var("MAGPIE_BLOBS_DIR") {
+        return Some(std::path::PathBuf::from(over));
+    }
     dirs::data_dir().map(|d| d.join("magpie").join("blobs"))
 }
 

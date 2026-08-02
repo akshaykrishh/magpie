@@ -1,0 +1,144 @@
+/* The toast window's entire visual design, hand-written CSS -- this page
+   ships without React or Tailwind (see src/toast.ts), so it can't use the
+   @theme-generated utility classes the rest of the app does. It still
+   pulls its colors from styles/tokens.css directly (`var(--mp-*)`), so a
+   token change updates this too and the accent-flip rule (the dark-grounds
+   accent vs. the light-grounds accent -- see tokens.css's own --mp-accent
+   doc comment) can't drift out of sync here.
+
+   Window is fixed at 280x64 (see tauri.conf.json) -- the first-capture
+   explainer state fits two compact lines in that space rather than
+   resizing the panel. Resizing a non-activating NSPanel is a real can of
+   worms (main-thread dispatch, re-verifying it still never steals focus)
+   that this stage's scope doesn't call for; a taller window for that one
+   state is a reasonable future enhancement, not a requirement here. */
+
+@import "./tokens.css";
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* This window's own `.dark` is applied by theme-boot.ts exactly like
+   every other window -- see toast.ts's first import. */
+#toast {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  width: 280px;
+  height: 64px;
+  box-sizing: border-box;
+  padding: 10px 15px 10px 13px;
+  border-radius: 13px;
+  border: 1px solid var(--mp-hairline-strong);
+  background: var(--mp-overlay);
+  backdrop-filter: blur(20px);
+  box-shadow: var(--mp-shadow-float);
+  font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* The mark: one 220ms scale-in on first paint of a NEW toast state, never
+   on anything else -- see index.css's mp-scale-in keyframe doc comment,
+   which this mirrors by hand since this window can't import that
+   Tailwind utility. Re-triggered per capture by toast.ts removing and
+   re-adding the class, since each capture IS a fresh appearance here. */
+#mark {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 2px;
+  transform: rotate(45deg);
+  animation: mp-scale-in 220ms ease-out;
+}
+@keyframes mp-scale-in {
+  from {
+    opacity: 0;
+    transform: rotate(45deg) scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(45deg) scale(1);
+  }
+}
+/* Captured, with or without a named destination -- solid accent fill. */
+#mark.solid {
+  background: var(--mp-accent);
+}
+/* Nothing/error -- faint neutral fill, no accent. Matches ui/DiamondMark's
+   "muted" state (see components/ui/DiamondMark.tsx) for the same meaning
+   in the React windows. */
+#mark.muted {
+  background: var(--mp-fg-faint);
+}
+
+#body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#msg {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--mp-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The Nothing/error state's message reuses #msg but muted, never accent --
+   an error is never colored like a destination. */
+#toast.nothing #msg {
+  color: var(--mp-fg-muted);
+  font-weight: 400;
+}
+
+/* Destination row: "→ MAGPIE-CORE". Always rendered as a guess (dashed
+   underline) -- see toast.ts / GuessedDestination's Rust doc comment for
+   why this window never has a "certain" destination to show. */
+#dest {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+#dest[hidden] {
+  display: none;
+}
+#arrow {
+  font-size: 11px;
+  color: var(--mp-fg-faint);
+}
+#dest-name {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--mp-accent);
+  border-bottom: 1px dashed var(--mp-accent-line);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* First-capture explainer: "Captured" + a muted second line spelling out
+   what just happened, replacing the destination row entirely for exactly
+   this one state (see capture_flow.rs's FIRST_CAPTURE_VISIBLE_MS doc
+   comment on why this is capture #1 only, not a graduated #2-5 step). */
+#explainer {
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--mp-fg-muted);
+}
+#explainer[hidden] {
+  display: none;
+}

@@ -26,6 +26,12 @@ pub struct Session {
     pub handback_count: i64,
     pub captures_during_session: Option<i64>,
     pub unpromoted_at_end: Option<i64>,
+    /// This session's small, stable, per-project label (`S1`, `S2`, ...) --
+    /// see migrations/0010_ui_provenance.sql for the allocation rule.
+    /// `None` only for rows written before that migration existed; every
+    /// session created after it gets one. S0 is never a value here -- it's
+    /// synthesized for the human in the Tauri layer, not a `Session` row.
+    pub ordinal: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -69,6 +75,19 @@ pub struct Capture {
     pub merged_into: Option<i64>,
     pub section_id: Option<i64>,
     pub deleted_at: Option<String>,
+
+    /// Which session produced this capture, if any -- `None` for hotkey/
+    /// CLI/typed captures (rendered as S0) and for anything captured
+    /// before migration 0010 added this column. Durable, unlike
+    /// `lease_session` (cleared on every lease resolution) -- see that
+    /// migration's doc comment.
+    pub session_id: Option<String>,
+    /// How `project_id` was decided -- `"certain"` (an MCP session's
+    /// `project::detect()` read an actual git remote, or a human chose
+    /// it) or `"guessed"` (the desktop app's recency guess, confirmed by
+    /// a tap). `None` means unfiled, or filed before this column existed;
+    /// never backfilled, see migrations/0010_ui_provenance.sql.
+    pub filed_confidence: Option<String>,
 }
 
 impl Capture {
@@ -152,4 +171,10 @@ pub struct AuditEntry {
     pub actor: String,
     pub action: String,
     pub capture_id: Option<i64>,
+    /// Which session performed this action, if any -- lets the activity
+    /// overlay group by session instead of by time (see the redesign
+    /// plan). `None` for every row written before migration 0010 added
+    /// this column; the UI groups those into an explicit "Earlier" bucket
+    /// rather than guessing.
+    pub session_id: Option<String>,
 }

@@ -19,3 +19,8 @@ clap = { version = "4", features = ["derive"] }
 serde.workspace = true
 serde_json.workspace = true
 tempfile = "3"
+# Matches magpie-core's own `dirs = "6"` -- used only by `seed`'s default
+# scratch-database path (crates/magpie-cli/src/seed.rs), which deliberately
+# does NOT go through magpie-core::default_db_path() so it never inherits
+# that function's MAGPIE_DB_PATH override for its own default location.
+dirs = "6"

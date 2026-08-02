@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window, the toast, and the pinned dock",
-  "windows": ["main", "toast", "dock"],
+  "description": "Capability for the main window, the toast, the pinned dock, settings, and the redesign's floating surfaces (aim, across)",
+  "windows": ["main", "toast", "dock", "settings", "aim", "across"],
   "permissions": [
     "core:default",
     "opener:default"

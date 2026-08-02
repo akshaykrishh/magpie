@@ -1,89 +1,77 @@
-// Non-activating toast window, proven in the M0 focus spike: the "toast"
-// window (declared in tauri.conf.json) is converted into an NSPanel that can
-// never become key/main, then shown with `orderFrontRegardless` (via
-// Panel::show) rather than `makeKeyWindow` -- see tauri-nspanel's panel.rs.
-// Linux/Windows fall back to a plain window show/hide, not yet verified
-// non-activating (no Linux machine available to test on yet).
+// The capture toast: a non-activating panel (see panels.rs for the shared
+// NSPanel plumbing this is now a thin caller over) that reports what a
+// capture hotkey press just did, never taking focus from whatever app the
+// user was in.
 
 use serde::Serialize;
 
-/// Everything the toast window can be told to show. `Plain` covers the
-/// existing flat-message cases (capture ok/failed, nothing to capture,
-/// secure input blocked). `Guess` is a proposed filing destination -- it is
-/// never written to the capture's `project_id` just by being shown (see
+/// A proposed filing destination named in a `Captured` toast -- never
+/// written to the capture's `project_id` just by being shown (see
 /// docs/design.md "nothing is ever auto-filed"); committing it is a
 /// separate, explicit action (see capture_flow.rs's tap-to-confirm).
+///
+/// Always rendered as a *guess* (dashed underline, per the design's visual
+/// language), never as "certain": certain filing only happens when an MCP
+/// session's `project::detect()` reads an actual git remote (see
+/// crates/magpie-mcp/src/project.rs), and agent-driven captures never show
+/// a toast at all -- there is no code path today where this window's
+/// "Captured" toast could honestly claim certainty. If one is ever added,
+/// this struct is where a `confidence` field belongs; don't add one before
+/// something real can set it.
+#[derive(Debug, Clone, Serialize)]
+pub struct GuessedDestination {
+    pub project_id: i64,
+    pub project_name: String,
+}
+
+/// Everything the toast window can be told to show.
+///
+/// Only two of the design's four visual states are constructed by any code
+/// path today -- `Captured` (with or without a destination) and `Nothing`.
+/// The third, "chord" state ("Into Now" -- hold the hotkey to promote
+/// straight into the queue) is a distinct gesture from stage 9's
+/// hold-to-aim picker (see aim.rs) and isn't scoped by the redesign plan
+/// at all; it is deliberately not added here as an always-`None` field or
+/// a never-constructed variant ahead of whatever eventually specifies it.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ToastPayload {
-    Plain {
-        message: String,
-    },
-    Guess {
+    /// A capture landed in the stream. `destination` is `None` when no
+    /// project exists yet to guess -- a real state at the earliest data
+    /// tiers, not an error (see the redesign plan's "zero"/"sparse" tiers).
+    /// `first_capture` is true only for the very first capture this
+    /// installation has ever made (see capture_flow.rs's
+    /// `toast_capture_count` setting) -- it holds the toast for longer
+    /// with an explanatory message instead of the usual pill, per the
+    /// design's "capture #1 spells it out."
+    Captured {
         capture_id: i64,
-        project_id: i64,
-        project_name: String,
+        destination: Option<GuessedDestination>,
+        first_capture: bool,
     },
+    /// Nothing was captured, or a resolvable/expected failure occurred --
+    /// covers "Nothing to capture," Secure Input blocked, and capture or
+    /// screenshot insert failures. One shared muted visual treatment (see
+    /// toast.ts); the specific reason always lives in `message` rather
+    /// than being collapsed to a single generic string, since e.g. Secure
+    /// Input blocked needs a different fix from an empty clipboard.
+    Nothing { message: String },
 }
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
+
+use crate::panels;
 
 pub const TOAST_LABEL: &str = "toast";
 
-#[cfg(target_os = "macos")]
-use tauri_nspanel::{tauri_panel, ManagerExt};
-
-#[cfg(target_os = "macos")]
-tauri_panel! {
-    panel!(ToastPanel {
-        config: {
-            can_become_key_window: false,
-            can_become_main_window: false,
-            is_floating_panel: true
-        }
-    })
-}
-
-#[cfg(target_os = "macos")]
-pub use tauri_nspanel::WebviewWindowExt as ToastWebviewWindowExt;
-
-#[cfg(target_os = "macos")]
 pub fn init_toast_panel(app: &AppHandle) {
-    let window = app
-        .get_webview_window(TOAST_LABEL)
-        .expect("toast window must be declared in tauri.conf.json");
-    window
-        .to_panel::<ToastPanel>()
-        .expect("failed to convert toast window into a non-activating NSPanel");
+    panels::to_non_activating_panel(app, TOAST_LABEL);
 }
 
-#[cfg(not(target_os = "macos"))]
-pub fn init_toast_panel(_app: &AppHandle) {}
-
-#[cfg(target_os = "macos")]
 pub fn show_toast(app: &AppHandle) {
-    if let Ok(panel) = app.get_webview_panel(TOAST_LABEL) {
-        panel.show();
-    }
+    panels::show_panel(app, TOAST_LABEL);
 }
 
-#[cfg(target_os = "macos")]
 pub fn hide_toast(app: &AppHandle) {
-    if let Ok(panel) = app.get_webview_panel(TOAST_LABEL) {
-        panel.hide();
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn show_toast(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(TOAST_LABEL) {
-        let _ = window.show();
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn hide_toast(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(TOAST_LABEL) {
-        let _ = window.hide();
-    }
+    panels::hide_panel(app, TOAST_LABEL);
 }

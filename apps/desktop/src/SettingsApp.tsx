@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { api } from "./lib/api";
+import { type ThemePreference, readStoredPreference, setThemePreference } from "./lib/theme";
 
 /// A modifier key must be present in a hotkey spec for it to be a plausible
 /// global shortcut at all -- this is a client-side sanity check only
@@ -31,6 +32,12 @@ function SettingsApp() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  // Seeded from the synchronous localStorage mirror (see theme-boot.ts) so
+  // this control never flashes the wrong selection while get_setting's IPC
+  // round-trip is in flight -- the mirror is at most one change behind the
+  // SQLite row, and by the time it could be wrong the user hasn't opened
+  // Settings yet to see it.
+  const [themePref, setThemePref] = useState<ThemePreference>(() => readStoredPreference());
 
   const loadSettings = () =>
     api.getHotkeySettings().then((settings) => {
@@ -77,37 +84,66 @@ function SettingsApp() {
     }
   }
 
+  async function handleThemeChange(pref: ThemePreference) {
+    setThemePref(pref);
+    await setThemePreference(pref);
+  }
+
   return (
-    <main className="flex h-screen flex-col gap-4 overflow-hidden bg-white p-4 dark:bg-neutral-950">
-      <h1 className="font-display text-lg font-bold text-ink dark:text-white">Settings</h1>
+    <main className="flex h-screen flex-col gap-4 overflow-hidden bg-ground p-4">
+      <h1 className="font-display text-lg font-bold text-fg">Settings</h1>
 
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+      {error && <p className="text-body-sm text-danger">{error}</p>}
 
-      <label className="flex flex-col gap-1 text-sm text-ink dark:text-neutral-200">
+      <fieldset className="flex flex-col gap-2 text-body-sm text-fg">
+        <legend className="font-mono-label text-label-sm tracking-label uppercase text-fg-faint">
+          Appearance
+        </legend>
+        <div className="flex gap-1 rounded-sm border border-hairline bg-surface p-1">
+          {(["system", "light", "dark"] as const).map((pref) => (
+            <button
+              key={pref}
+              type="button"
+              onClick={() => void handleThemeChange(pref)}
+              aria-pressed={themePref === pref}
+              className={
+                "flex-1 rounded-xs px-2 py-1 text-body-sm capitalize transition-colors " +
+                (themePref === pref
+                  ? "bg-accent text-fg-on-accent"
+                  : "text-fg-muted hover:bg-surface-hover")
+              }
+            >
+              {pref}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+
+      <label className="flex flex-col gap-1 text-body-sm text-fg">
         Capture hotkey
         <input
-          className="rounded border border-neutral-300 bg-white px-2 py-1 font-mono-label text-sm dark:border-neutral-700 dark:bg-neutral-900 dark:text-white"
+          className="rounded-xs border border-hairline bg-surface px-2 py-1 font-mono-label text-body-sm text-fg"
           value={capture}
           onChange={(e) => setCapture(e.target.value)}
           disabled={!loaded}
         />
         {!captureValid && loaded && (
-          <span className="text-xs text-red-600 dark:text-red-400">
+          <span className="text-label text-danger">
             Must include at least one modifier (⌘/Ctrl/⌥/⇧).
           </span>
         )}
       </label>
 
-      <label className="flex flex-col gap-1 text-sm text-ink dark:text-neutral-200">
+      <label className="flex flex-col gap-1 text-body-sm text-fg">
         Screenshot hotkey
         <input
-          className="rounded border border-neutral-300 bg-white px-2 py-1 font-mono-label text-sm dark:border-neutral-700 dark:bg-neutral-900 dark:text-white"
+          className="rounded-xs border border-hairline bg-surface px-2 py-1 font-mono-label text-body-sm text-fg"
           value={screenshot}
           onChange={(e) => setScreenshot(e.target.value)}
           disabled={!loaded}
         />
         {!screenshotValid && loaded && (
-          <span className="text-xs text-red-600 dark:text-red-400">
+          <span className="text-label text-danger">
             Must include at least one modifier (⌘/Ctrl/⌥/⇧).
           </span>
         )}
@@ -121,7 +157,7 @@ function SettingsApp() {
           type="button"
           disabled={!canSave}
           onClick={handleSave}
-          className="rounded bg-slate-teal px-3 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-teal-light"
+          className="rounded-xs bg-accent px-3 py-1.5 text-body-sm text-fg-on-accent disabled:cursor-not-allowed disabled:opacity-50"
         >
           {saving ? "Saving…" : "Save"}
         </button>

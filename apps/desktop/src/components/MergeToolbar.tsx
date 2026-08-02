@@ -29,7 +29,7 @@ export function MergeToolbar({
   projects,
   sections,
 }: MergeToolbarProps) {
-  // Same imperative open-at-click-point pattern CaptureItem's own
+  // Same imperative open-at-click-point pattern CaptureRow's own
   // ContextMenuTrigger/ContextMenu pair already uses (see ContextMenu.tsx) --
   // reusing it here (rather than a native <select> or a bespoke dropdown)
   // means "Move to Project/Section" renders and behaves identically whether

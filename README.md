@@ -25,20 +25,13 @@ hands can empty.
 
 ## Roadmap
 
-Building toward a first packaged release in stages:
+The capture core, MCP server + CLI, and prompt packs are done and usable today. Screenshots + OCR
+work on macOS; Linux has the code but not yet a first-hand run on real hardware. Packaging ships
+unsigned installers from CI; real code signing is still a manual step.
 
-- **Capture core** — the stream, the `Now` working set, search, merge, tags, projects (done)
-- **MCP server + CLI** — agents can read and write the queue over the Model Context Protocol,
-  reusable prompt templates (done)
-- **Screenshots + OCR** — region capture, searchable via on-device text recognition (done on
-  macOS; implemented on Linux but not yet verified on real hardware)
-- **Prompt packs** — shared, git-hosted collections of templates, with fill-in-the-blank prompts
-  (done)
-- **Packaging** — CI builds unsigned installers for macOS and Linux on every push (done); real
-  code signing and notarization are still a manual step (see docs/design.md "Signing")
-
-See [docs/design.md](docs/design.md) for the full architecture, the reasoning behind each design
-decision, and the current status of each piece.
+**[ROADMAP.md](ROADMAP.md)** has what's next, in Now/Next/Later form, and what this project is
+deliberately not doing. **[docs/design.md](docs/design.md)** is the architecture and the reasoning
+behind each decision.
 
 ## License
 

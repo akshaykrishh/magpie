@@ -283,10 +283,18 @@ impl MagpieServer {
         &self,
         Parameters(args): Parameters<AddArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let capture = self.store.capture(&args.body, None).map_err(to_error)?;
-        if self.project_id.is_some() {
+        let capture = self
+            .store
+            .capture_with_session(&args.body, None, Some(&self.session))
+            .map_err(to_error)?;
+        if let Some(project_id) = self.project_id {
+            // 'certain': this session's project was resolved by
+            // `project::detect()` reading the actual git remote (see
+            // MagpieServer::new / project.rs), not guessed -- the one
+            // filing path in the whole app that can honestly claim that
+            // confidence level. See migrations/0010_ui_provenance.sql.
             self.store
-                .assign_project(capture.id, self.project_id)
+                .file_capture(capture.id, project_id, "certain")
                 .map_err(to_error)?;
         }
         to_json_result(&serde_json::json!({ "ok": true, "id": capture.id }))

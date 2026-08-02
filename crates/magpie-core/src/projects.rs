@@ -135,6 +135,26 @@ impl Store {
                 .filter(|s| s.project_id == project_id && s.ended_at.is_none())
                 .count() as i64
         };
+        // Live sessions preferred over ended ones, even if an ended one
+        // connected more recently -- see ProjectOverview.branch's doc
+        // comment. `all_sessions` is already ordered started_at DESC (see
+        // list_sessions), so within each preference tier this still picks
+        // the most recently started match.
+        let branch_for = |project_id: Option<i64>| {
+            let mut matches = all_sessions.iter().filter(|s| s.project_id == project_id);
+            matches
+                .clone()
+                .find(|s| s.ended_at.is_none())
+                .or_else(|| matches.next())
+                .and_then(|s| s.branch.clone())
+        };
+
+        let now_cap = self
+            .get_setting("now_cap")
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_NOW_CAP);
 
         let mut overviews = Vec::new();
 
@@ -146,6 +166,10 @@ impl Store {
             leased_count: inbox_now.iter().filter(|c| c.is_leased()).count() as i64,
             needs_review_count: inbox_now.iter().filter(|c| c.needs_review()).count() as i64,
             active_session_count: active_sessions_for(None),
+            unfiled_count: Some(self.count_unfiled()?),
+            unpromoted_count: self.count_unpromoted(None)?,
+            branch: None,
+            now_cap,
         });
 
         // A generous upper bound rather than a true "no limit" --
@@ -160,6 +184,10 @@ impl Store {
                 leased_count: now_items.iter().filter(|c| c.is_leased()).count() as i64,
                 needs_review_count: now_items.iter().filter(|c| c.needs_review()).count() as i64,
                 active_session_count: active_sessions_for(Some(project.id)),
+                unfiled_count: None,
+                unpromoted_count: self.count_unpromoted(Some(project.id))?,
+                branch: branch_for(Some(project.id)),
+                now_cap,
             });
         }
 
@@ -175,7 +203,29 @@ pub struct ProjectOverview {
     pub leased_count: i64,
     pub needs_review_count: i64,
     pub active_session_count: i64,
+    /// Total unfiled captures -- `Some` only on the Inbox row (`project_id:
+    /// None`); `None` on every real project row, since "unfiled" isn't a
+    /// property a project scope has. Backs Across's `Unfiled` row.
+    pub unfiled_count: Option<i64>,
+    /// This scope's stream captures not yet promoted to Now -- meaningful
+    /// for every row, Inbox included. Backs the Resume card's "N
+    /// unpromoted captures waiting."
+    pub unpromoted_count: i64,
+    /// The branch of this project's most recently active session (live
+    /// sessions preferred over ended ones, even if an ended one connected
+    /// more recently) -- `None` when no session has ever reported one, or
+    /// on the Inbox row, where branch never applies. See the redesign
+    /// plan's "render as unknown, never invent": the desktop app has no
+    /// git access of its own, so this is the only honest source.
+    pub branch: Option<String>,
+    /// Display-only Now capacity (see `settings.now_cap`, default 7) --
+    /// the same value on every row, included here so a per-row capacity
+    /// meter doesn't need its own settings fetch. Never enforced: no cap
+    /// exists anywhere in `promote()`.
+    pub now_cap: i64,
 }
+
+const DEFAULT_NOW_CAP: i64 = 7;
 
 #[cfg(test)]
 mod tests {
@@ -379,5 +429,146 @@ mod tests {
         assert_eq!(overview[0].project_id, None, "Inbox is always first");
         assert_eq!(overview[1].project_id, Some(a.id));
         assert_eq!(overview[2].project_id, Some(b.id));
+    }
+
+    #[test]
+    fn unfiled_count_is_only_populated_on_the_inbox_row() {
+        let store = Store::open_in_memory().unwrap();
+        let proj = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        store.capture("unfiled 1", None).unwrap();
+        store.capture("unfiled 2", None).unwrap();
+        let filed = store.capture("filed", None).unwrap();
+        store.assign_project(filed.id, Some(proj.id)).unwrap();
+
+        let overview = store.list_projects_overview().unwrap();
+        let inbox = overview.iter().find(|o| o.project_id.is_none()).unwrap();
+        let project_row = overview
+            .iter()
+            .find(|o| o.project_id == Some(proj.id))
+            .unwrap();
+
+        assert_eq!(inbox.unfiled_count, Some(2));
+        assert_eq!(
+            project_row.unfiled_count, None,
+            "unfiled doesn't apply to an already-filed scope"
+        );
+    }
+
+    #[test]
+    fn unpromoted_count_applies_to_every_scope() {
+        let store = Store::open_in_memory().unwrap();
+        let proj = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        store.capture("unfiled, unpromoted", None).unwrap();
+        let filed_unpromoted = store.capture("filed, unpromoted", None).unwrap();
+        store
+            .assign_project(filed_unpromoted.id, Some(proj.id))
+            .unwrap();
+        let filed_promoted = store.capture("filed, promoted", None).unwrap();
+        store
+            .assign_project(filed_promoted.id, Some(proj.id))
+            .unwrap();
+        store.promote(filed_promoted.id).unwrap();
+
+        let overview = store.list_projects_overview().unwrap();
+        let inbox = overview.iter().find(|o| o.project_id.is_none()).unwrap();
+        let project_row = overview
+            .iter()
+            .find(|o| o.project_id == Some(proj.id))
+            .unwrap();
+
+        assert_eq!(inbox.unpromoted_count, 1);
+        assert_eq!(project_row.unpromoted_count, 1, "promoted item excluded");
+    }
+
+    #[test]
+    fn branch_prefers_a_live_session_over_a_more_recently_ended_one() {
+        let store = Store::open_in_memory().unwrap();
+        let proj = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        store
+            .create_session(
+                "sess-old-live",
+                100,
+                Some(proj.id),
+                Some("feat/config-schema"),
+            )
+            .unwrap();
+        // Started (and ended) after sess-old-live, but ended -- must not
+        // outrank the still-live session just because it connected later.
+        store
+            .create_session("sess-new-ended", 200, Some(proj.id), Some("fix/oom-on-ocr"))
+            .unwrap();
+        store.end_session("sess-new-ended").unwrap();
+
+        let overview = store.list_projects_overview().unwrap();
+        let project_row = overview
+            .iter()
+            .find(|o| o.project_id == Some(proj.id))
+            .unwrap();
+        assert_eq!(project_row.branch.as_deref(), Some("feat/config-schema"));
+    }
+
+    #[test]
+    fn branch_falls_back_to_the_most_recent_ended_session_when_none_are_live() {
+        let store = Store::open_in_memory().unwrap();
+        let proj = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+        store
+            .create_session("sess-1", 100, Some(proj.id), Some("main"))
+            .unwrap();
+        store.end_session("sess-1").unwrap();
+        store
+            .create_session("sess-2", 200, Some(proj.id), Some("feat/y"))
+            .unwrap();
+        store.end_session("sess-2").unwrap();
+
+        let overview = store.list_projects_overview().unwrap();
+        let project_row = overview
+            .iter()
+            .find(|o| o.project_id == Some(proj.id))
+            .unwrap();
+        assert_eq!(
+            project_row.branch.as_deref(),
+            Some("feat/y"),
+            "the more recently started session, even though both ended"
+        );
+    }
+
+    #[test]
+    fn branch_is_none_when_no_session_has_ever_reported_one() {
+        let store = Store::open_in_memory().unwrap();
+        let proj = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+
+        let overview = store.list_projects_overview().unwrap();
+        let inbox = overview.iter().find(|o| o.project_id.is_none()).unwrap();
+        let project_row = overview
+            .iter()
+            .find(|o| o.project_id == Some(proj.id))
+            .unwrap();
+        assert_eq!(inbox.branch, None, "branch never applies to Inbox");
+        assert_eq!(project_row.branch, None);
+    }
+
+    #[test]
+    fn now_cap_defaults_to_seven_and_reflects_the_setting_on_every_row() {
+        let store = Store::open_in_memory().unwrap();
+        let _proj = store
+            .get_or_create_project("a", Some("git@github.com:x/a.git"), None)
+            .unwrap();
+
+        let overview = store.list_projects_overview().unwrap();
+        assert!(overview.iter().all(|o| o.now_cap == 7));
+
+        store.set_setting("now_cap", "12").unwrap();
+        let overview = store.list_projects_overview().unwrap();
+        assert!(overview.iter().all(|o| o.now_cap == 12));
     }
 }

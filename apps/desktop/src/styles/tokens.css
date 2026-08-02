@@ -1,0 +1,95 @@
+/* Two-theme semantic token layer -- the single source of truth for color,
+   shadow, and hairline values across every window (main, dock, settings,
+   and the toast/aim/across floating panels).
+
+   Plain CSS, not a Tailwind file: the toast window ships without React or
+   Tailwind (see src/toast.ts), and it still needs to render in the right
+   theme. Every other window imports this indirectly via index.css's
+   `@theme inline` block (see index.css for why `inline` specifically).
+
+   `:root` is Paper (design option 1c), `.dark` is Slate (design option
+   3a -- the canonical spec). The `.dark` class is applied by
+   src/lib/theme-boot.ts before first paint; see that file for why.
+
+   The one rule that must never break across every surface: `--mp-accent`
+   flips value between themes, it does not merge. #3E7A92 is drawn only on
+   dark grounds in the design ("wing on dark grounds only" -- carried over
+   from the original brand spec); #123A4B is its light-ground counterpart.
+   Never hardcode either hex outside this file -- see the CI guard in the
+   redesign plan's stage 12.
+
+   `--mp-accent-on-light`/`--mp-accent-on-dark`, below, are the one
+   deliberate exception to "just use --mp-accent": a handful of call sites
+   (see index.css's `--color-slate-teal`/`-light`) pair the two fixed
+   colors by hand via explicit `dark:` classes rather than one class that
+   flips, and need a value that stays put regardless of the current theme
+   to do that -- `--mp-accent` itself can't serve that role since it's
+   defined differently per selector below and always resolves to whichever
+   theme is currently active. */
+
+:root {
+  /* Theme-independent by design -- see the doc comment above. Not part of
+     either theme block below since neither should override it. */
+  --mp-accent-on-light: #123a4b;
+  --mp-accent-on-dark: #3e7a92;
+
+  /* ---- Paper (1c) ---- */
+  --mp-ground: #edeae4;
+  --mp-ground-raised: #f4f2ee;
+  --mp-ground-sunken: #ffffff;
+  --mp-surface: #ffffff;
+  --mp-surface-hover: rgba(14, 14, 14, 0.035);
+  --mp-overlay: rgba(244, 242, 238, 0.94);
+
+  --mp-hairline: rgba(14, 14, 14, 0.08);
+  --mp-hairline-strong: rgba(14, 14, 14, 0.14);
+
+  --mp-fg: #0e0e0e;
+  --mp-fg-muted: rgba(14, 14, 14, 0.62);
+  --mp-fg-faint: rgba(14, 14, 14, 0.4);
+  --mp-fg-on-accent: #ffffff;
+
+  --mp-accent: #123a4b;
+  --mp-accent-tint: rgba(18, 58, 75, 0.07);
+  --mp-accent-tint-strong: rgba(18, 58, 75, 0.12);
+  --mp-accent-line: rgba(18, 58, 75, 0.28);
+
+  --mp-danger: #8c2f2f;
+  --mp-cursor-outline: rgba(14, 14, 14, 0.3);
+
+  --mp-shadow-float: 0 6px 18px rgba(14, 14, 14, 0.22);
+  --mp-shadow-sheet: 0 12px 40px rgba(14, 14, 14, 0.26);
+
+  color-scheme: light;
+}
+
+.dark {
+  /* ---- Slate (3a canonical) ---- */
+  --mp-ground: #0e0e0e;
+  --mp-ground-raised: #111111;
+  --mp-ground-sunken: #141414;
+  --mp-surface: rgba(255, 255, 255, 0.035);
+  --mp-surface-hover: rgba(255, 255, 255, 0.06);
+  --mp-overlay: rgba(14, 14, 14, 0.85);
+
+  --mp-hairline: rgba(255, 255, 255, 0.07);
+  --mp-hairline-strong: rgba(255, 255, 255, 0.1);
+
+  --mp-fg: rgba(255, 255, 255, 0.92);
+  --mp-fg-muted: rgba(255, 255, 255, 0.55);
+  --mp-fg-faint: rgba(255, 255, 255, 0.34);
+  --mp-fg-on-accent: #0e0e0e;
+
+  --mp-accent: #3e7a92;
+  --mp-accent-tint: rgba(62, 122, 146, 0.13);
+  --mp-accent-tint-strong: rgba(62, 122, 146, 0.18);
+  --mp-accent-line: rgba(62, 122, 146, 0.4);
+
+  --mp-danger: #c96a6a;
+  --mp-cursor-outline: rgba(255, 255, 255, 0.32);
+
+  --mp-shadow-float: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --mp-shadow-sheet: 0 16px 48px rgba(0, 0, 0, 0.55);
+
+  color-scheme: dark;
+}

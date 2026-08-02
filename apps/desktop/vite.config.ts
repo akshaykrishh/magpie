@@ -20,8 +20,15 @@ export default defineConfig(async () => ({
       input: {
         main: resolve(import.meta.dirname, "index.html"),
         toast: resolve(import.meta.dirname, "toast.html"),
+        aim: resolve(import.meta.dirname, "aim.html"),
+        across: resolve(import.meta.dirname, "across.html"),
         dock: resolve(import.meta.dirname, "dock.html"),
         settings: resolve(import.meta.dirname, "settings.html"),
+        // Dev-only design gallery -- a Vite input so it gets React/Tailwind
+        // and hot reload, but deliberately NOT a Tauri window (see
+        // src-tauri/tauri.conf.json). Open at http://localhost:1420/gallery.html
+        // during `pnpm tauri dev` / `pnpm dev`.
+        gallery: resolve(import.meta.dirname, "gallery.html"),
       },
     },
   },

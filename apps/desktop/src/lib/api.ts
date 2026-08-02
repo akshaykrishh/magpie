@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AuditEntry,
+  AuditEntryView,
   Blob,
   Capabilities,
   Capture,
@@ -10,6 +11,9 @@ import type {
   ProjectOverview,
   Section,
   Session,
+  SessionView,
+  SettingKey,
+  StreamRow,
   Tag,
   Template,
 } from "./types";
@@ -17,6 +21,9 @@ import type {
 export const api = {
   listStream: (filter: ProjectFilter, limit = 200, offset = 0) =>
     invoke<Capture[]>("list_stream", { filter, limit, offset }),
+
+  listStreamRows: (filter: ProjectFilter, limit = 200, offset = 0) =>
+    invoke<StreamRow[]>("list_stream_rows", { filter, limit, offset }),
 
   listNow: (projectId: number | null) =>
     invoke<Capture[]>("list_now", { projectId }),
@@ -74,6 +81,8 @@ export const api = {
   listSessions: (projectId: number | null) =>
     invoke<Session[]>("list_sessions", { projectId }),
 
+  listSessionsView: () => invoke<SessionView[]>("list_sessions_view"),
+
   listProjectsOverview: () => invoke<ProjectOverview[]>("list_projects_overview"),
 
   exportJson: () => invoke<string>("export_json"),
@@ -82,6 +91,18 @@ export const api = {
   captureCapabilities: () => invoke<Capabilities>("capture_capabilities"),
 
   openAccessibilitySettings: () => invoke<void>("open_accessibility_settings"),
+
+  showSettingsWindow: () => invoke<void>("show_settings_window"),
+
+  /// `projectId: null` clears the pin (Inbox) -- see the Rust command's
+  /// doc comment for why this is one round trip rather than a
+  /// `setSetting` call plus a separate window-focus command.
+  selectAcrossProject: (projectId: number | null) =>
+    invoke<void>("select_across_project", { projectId }),
+
+  hideAcross: () => invoke<void>("hide_across"),
+
+  toggleAcross: () => invoke<void>("toggle_across"),
 
   listTemplates: () => invoke<Template[]>("list_templates"),
 
@@ -134,6 +155,20 @@ export const api = {
 
   listAudit: (limit = 50) => invoke<AuditEntry[]>("list_audit", { limit }),
 
+  listAuditEnriched: (limit = 50) =>
+    invoke<AuditEntryView[]>("list_audit_enriched", { limit }),
+
+  revokeLease: (id: number) => invoke<void>("revoke_lease", { id }),
+
+  pinCaptureToBranch: (id: number, branch: string | null) =>
+    invoke<Capture>("pin_capture_to_branch", { id, branch }),
+
+  countUnfiled: () => invoke<number>("count_unfiled"),
+
+  sendBackForRework: (id: number) => invoke<Capture>("send_back_for_rework", { id }),
+
+  copyText: (text: string) => invoke<void>("copy_text", { text }),
+
   getCaptureBlob: (captureId: number) =>
     invoke<Blob | null>("get_capture_blob", { captureId }),
 
@@ -148,4 +183,8 @@ export const api = {
     invoke<void>("copy_captures_as_checklist", { ids }),
 
   getHotkeySettings: () => invoke<HotkeySettings>("get_hotkey_settings"),
+
+  getSetting: (key: SettingKey) => invoke<string | null>("get_setting", { key }),
+  setSetting: (key: SettingKey, value: string) =>
+    invoke<void>("set_setting", { key, value }),
 };

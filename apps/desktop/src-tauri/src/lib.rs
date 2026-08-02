@@ -1,7 +1,11 @@
+mod across;
+mod aim;
 mod capture_flow;
 mod commands;
 mod dead_pid_sweep;
+mod panels;
 mod purge_sweep;
+mod sessions_view;
 mod settings_commands;
 mod state;
 mod toast;
@@ -21,6 +25,11 @@ pub(crate) const HOTKEY: &str = "CommandOrControl+Shift+M";
 /// any existing app shortcut essentially impossible while staying
 /// mnemonically paired with the capture hotkey it extends.
 pub(crate) const SCREENSHOT_HOTKEY: &str = "CommandOrControl+Shift+Alt+M";
+/// Across's chord -- fixed, not user-remappable like the capture/screenshot
+/// pair (see settings_commands.rs's key allowlist, which doesn't cover
+/// this one), so it never needs `HotkeyRuntime`'s rebind-tracking: it's
+/// parsed once at startup and compared directly in the handler below.
+const ACROSS_HOTKEY: &str = "CommandOrControl+Alt+K";
 
 /// Tracks which `Shortcut` currently plays the "capture" and "screenshot"
 /// roles, so the single process-wide `with_handler` closure below can tell
@@ -37,6 +46,9 @@ pub(crate) const SCREENSHOT_HOTKEY: &str = "CommandOrControl+Shift+Alt+M";
 pub(crate) struct HotkeyRuntime {
     pub(crate) capture: Mutex<Shortcut>,
     pub(crate) screenshot: Mutex<Shortcut>,
+    /// Not a `Mutex`: unlike `capture`/`screenshot`, this one is never
+    /// rebound at runtime, so a plain value is enough.
+    across: Shortcut,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -85,12 +97,17 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin({
             tauri_plugin_global_shortcut::Builder::new()
-                .with_shortcuts([capture_hotkey.as_str(), screenshot_hotkey.as_str()])
+                .with_shortcuts([
+                    capture_hotkey.as_str(),
+                    screenshot_hotkey.as_str(),
+                    ACROSS_HOTKEY,
+                ])
                 .expect("invalid hotkey spec (corrupt stored setting?)")
                 .with_handler(|app, shortcut, event| {
                     let runtime = app.state::<HotkeyRuntime>();
                     let is_capture = *shortcut == *runtime.capture.lock().unwrap();
                     let is_screenshot = *shortcut == *runtime.screenshot.lock().unwrap();
+                    let is_across = *shortcut == runtime.across;
                     if is_capture {
                         if event.state == ShortcutState::Pressed {
                             capture_flow::on_capture_hotkey(app);
@@ -99,12 +116,15 @@ pub fn run() {
                         }
                     } else if is_screenshot && event.state == ShortcutState::Pressed {
                         capture_flow::on_screenshot_hotkey(app);
+                    } else if is_across && event.state == ShortcutState::Pressed {
+                        across::toggle(app);
                     }
                 })
                 .build()
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_stream,
+            commands::list_stream_rows,
             commands::list_now,
             commands::add_typed_capture,
             commands::promote_capture,
@@ -149,6 +169,14 @@ pub fn run() {
             commands::instantiate_template,
             commands::instantiate_template_into_many,
             commands::list_audit,
+            commands::list_audit_enriched,
+            commands::revoke_lease,
+            commands::pin_capture_to_branch,
+            commands::count_unfiled,
+            commands::show_settings_window,
+            sessions_view::list_sessions_view,
+            commands::send_back_for_rework,
+            commands::copy_text,
             commands::get_capture_blob,
             commands::get_blob_image_data_url,
             commands::copy_capture_image,
@@ -160,6 +188,11 @@ pub fn run() {
             commands::list_projects_overview,
             settings_commands::get_hotkey_settings,
             settings_commands::set_hotkey,
+            settings_commands::get_setting,
+            settings_commands::set_setting,
+            commands::select_across_project,
+            commands::hide_across,
+            commands::toggle_across,
         ])
         .on_window_event(|window, event| {
             if matches!(window.label(), "main" | "dock" | "settings") {
@@ -184,9 +217,13 @@ pub fn run() {
             let screenshot_shortcut: Shortcut = screenshot_hotkey
                 .parse()
                 .expect("invalid hotkey spec (corrupt stored setting?)");
+            let across_shortcut: Shortcut = ACROSS_HOTKEY
+                .parse()
+                .expect("ACROSS_HOTKEY is a hardcoded valid spec");
             app.manage(HotkeyRuntime {
                 capture: Mutex::new(capture_shortcut),
                 screenshot: Mutex::new(screenshot_shortcut),
+                across: across_shortcut,
             });
 
             let backend = state::make_backend();
@@ -208,6 +245,8 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             toast::init_toast_panel(app.handle());
+            aim::init_aim_panel(app.handle());
+            across::init_across_panel(app.handle());
             tray::init_tray(app.handle())?;
 
             Ok(())

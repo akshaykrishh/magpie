@@ -17,14 +17,19 @@ mod sections;
 mod sessions;
 mod settings;
 mod sources;
+mod stream;
 mod tags;
 mod templates;
 
+pub use audit::AuditEntryView;
 pub use captures::NewSource;
-pub use db::{default_blobs_dir, default_db_path, now_iso, Store};
+pub use db::{default_blobs_dir, default_db_path, iso_plus_hours, now_iso, Store};
 pub use error::{Error, Result};
 pub use export::CaptureExport;
 pub use lease::LeaseIdentity;
-pub use model::{AuditEntry, Blob, Capture, Pack, Project, Section, Session, Source, Tag, Template};
+pub use model::{
+    AuditEntry, Blob, Capture, Pack, Project, Section, Session, Source, Tag, Template,
+};
 pub use packs::{ParsedPack, ParsedPrompt};
 pub use projects::ProjectOverview;
+pub use stream::StreamRow;

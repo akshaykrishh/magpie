@@ -1,6 +1,6 @@
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
-use crate::captures::{capture_from_row, get_capture_tx, CAPTURE_COLUMNS};
+use crate::captures::{capture_from_row, get_active_capture_tx, get_capture_tx, CAPTURE_COLUMNS};
 use crate::db::now_iso;
 use crate::error::{Error, Result};
 use crate::model::Capture;
@@ -71,7 +71,13 @@ impl Store {
                     candidate.id
                 ],
             )?;
-            record_audit_tx(&tx, &identity.client, "queue_take", Some(candidate.id))?;
+            record_audit_tx(
+                &tx,
+                &identity.client,
+                "queue_take",
+                Some(candidate.id),
+                Some(&identity.session),
+            )?;
             crate::sessions::bump_session_leased_tx(&tx, &identity.session)?;
 
             let leased = get_capture_tx(&tx, candidate.id)?;
@@ -135,7 +141,7 @@ impl Store {
                  WHERE id = ?2",
                 params![now_iso(), id],
             )?;
-            record_audit_tx(&tx, &client, "capture_done", Some(id))?;
+            record_audit_tx(&tx, &client, "capture_done", Some(id), Some(session))?;
             crate::sessions::bump_session_completed_tx(&tx, session)?;
             let capture = get_capture_tx(&tx, id)?;
             tx.commit()?;
@@ -159,7 +165,7 @@ impl Store {
                  WHERE id = ?2",
                 params![reason, id],
             )?;
-            record_audit_tx(&tx, &client, "capture_fail", Some(id))?;
+            record_audit_tx(&tx, &client, "capture_fail", Some(id), Some(session))?;
             crate::sessions::bump_session_failed_tx(&tx, session)?;
             let capture = get_capture_tx(&tx, id)?;
             tx.commit()?;
@@ -176,6 +182,16 @@ impl Store {
     /// the caller computed via git; this function never computes it itself
     /// (see docs/design.md "MCP contract" -- magpie-core never shells out
     /// to git, only magpie-mcp does).
+    ///
+    /// Deliberately does NOT clear `lease_head_commit`, unlike every other
+    /// lease-ending path (`capture_complete`/`capture_fail`/
+    /// `release_leases_for_session`/`release_lease_as`) -- this is the one
+    /// outcome where a human is about to look at the item, and the commit
+    /// the diff was computed against (see `record_lease_head_commit`) is
+    /// exactly what a review sheet needs to let them open the real diff
+    /// themselves (`git diff <lease_head_commit>`). Every other ending
+    /// clears it because nobody needs to diff against it anymore; this one
+    /// is the opposite case.
     pub fn capture_handback(
         &self,
         id: i64,
@@ -190,15 +206,45 @@ impl Store {
                 "UPDATE captures
                  SET handback_note = ?1, diff_stat = ?2, handback_at = ?3,
                      lease_session = NULL, lease_client = NULL,
-                     lease_pid = NULL, lease_at = NULL, lease_head_commit = NULL
+                     lease_pid = NULL, lease_at = NULL
                  WHERE id = ?4",
                 params![note, diff_stat, now_iso(), id],
             )?;
-            record_audit_tx(&tx, &client, "capture_handback", Some(id))?;
+            record_audit_tx(&tx, &client, "capture_handback", Some(id), Some(session))?;
             crate::sessions::bump_session_handback_tx(&tx, session)?;
             let capture = get_capture_tx(&tx, id)?;
             tx.commit()?;
             Ok(capture)
+        })
+    }
+
+    /// The hand-back review sheet's "Send back" action: clears
+    /// `handback_note`/`diff_stat`/`handback_at`, leaving the item in Now,
+    /// unleased -- immediately retakeable by `queue_take`/visible to
+    /// `queue_peek` again, since both exclude `handback_at IS NOT NULL`.
+    /// `capture_handback` itself already clears the lease, so there's
+    /// nothing left to release here; this only undoes the review-pending
+    /// state. No "why sent back" text is accepted or stored -- there's no
+    /// column for it (only for why an *agent* handed something back), and
+    /// inventing one just for this audit row would be a field nothing
+    /// else in the schema honors.
+    ///
+    /// Also clears `lease_head_commit`, which `capture_handback` deliberately
+    /// preserves for the review sheet -- once sent back, that commit
+    /// reference is stale (the next `queue_take` sets a fresh one via
+    /// `record_lease_head_commit`), so this avoids leaving a dangling old
+    /// value sitting on an unleased row until then.
+    pub fn send_back_for_rework(&self, id: i64, actor: &str) -> Result<Capture> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE captures
+                 SET handback_note = NULL, diff_stat = NULL, handback_at = NULL,
+                     lease_head_commit = NULL
+                 WHERE id = ?1 AND deleted_at IS NULL",
+                params![id],
+            )?;
+            record_audit_tx(conn, actor, "handback_returned_to_queue", Some(id), None)?;
+            get_active_capture_tx(conn, id)
         })
     }
 
@@ -216,7 +262,13 @@ impl Store {
                 params![session],
             )?;
             if n > 0 {
-                record_audit_tx(conn, session, "session_disconnected_released_leases", None)?;
+                record_audit_tx(
+                    conn,
+                    session,
+                    "session_disconnected_released_leases",
+                    None,
+                    Some(session),
+                )?;
             }
             Ok(n)
         })
@@ -236,10 +288,61 @@ impl Store {
         })
     }
 
+    /// How many captures each live session currently holds a lease on --
+    /// the session strip's "holds" count. One grouped query rather than a
+    /// per-session lookup, matching `list_stream_rows`'s N+1 avoidance:
+    /// callers building a session view render captures held by all
+    /// sessions at once, so per-session lookups would be a query per row.
+    pub fn held_capture_counts(&self) -> Result<std::collections::HashMap<String, i64>> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT lease_session, COUNT(*) FROM captures
+                 WHERE lease_session IS NOT NULL GROUP BY lease_session",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })?;
+            Ok(rows.collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()?)
+        })
+    }
+
     /// Releases one specific lease unconditionally -- used by the dead-pid
     /// sweep once it's confirmed the holding process no longer exists.
     pub fn release_lease(&self, id: i64) -> Result<()> {
+        self.release_lease_as(id, "dead-pid-sweep", "lease_released_dead_process")
+    }
+
+    /// Releases a lease at a human's explicit request -- the Now column's
+    /// `⌥⌫ REVOKE` chip (see the redesign plan's stage 6). The manual
+    /// escape hatch for a lease that's stuck or simply in the way, kept
+    /// distinct from `release_lease`'s automatic dead-pid cleanup so the
+    /// audit log never misattributes a human's action to
+    /// `"dead-pid-sweep"` -- that hardcoded actor was exactly the gap this
+    /// command exists to close. `actor` is whatever the caller has for
+    /// "who did this"; magpie has no per-human identity concept yet, so
+    /// the Tauri command passes a fixed string.
+    pub fn revoke_lease(&self, id: i64, actor: &str) -> Result<()> {
+        self.release_lease_as(id, actor, "lease_revoked_by_human")
+    }
+
+    /// Shared by `release_lease` and `revoke_lease`: the same unconditional
+    /// clear, differing only in who's recorded as having done it and why.
+    /// The audit row's `session_id` is the session that *held* the lease
+    /// (read before it's cleared), not the revoking actor -- a human
+    /// revoking isn't a session at all, but attributing the event to the
+    /// session it happened to lets the activity overlay group it under
+    /// that session's timeline, which is the more useful reading ("S1's
+    /// lease was revoked") than leaving it session-less.
+    fn release_lease_as(&self, id: i64, actor: &str, action: &str) -> Result<()> {
         self.with_conn(|conn| {
+            let prior_session: Option<String> = conn
+                .query_row(
+                    "SELECT lease_session FROM captures WHERE id = ?1",
+                    params![id],
+                    |r| r.get(0),
+                )
+                .optional()?
+                .flatten();
             conn.execute(
                 "UPDATE captures
                  SET lease_session = NULL, lease_client = NULL,
@@ -247,12 +350,7 @@ impl Store {
                  WHERE id = ?1",
                 params![id],
             )?;
-            record_audit_tx(
-                conn,
-                "dead-pid-sweep",
-                "lease_released_dead_process",
-                Some(id),
-            )?;
+            record_audit_tx(conn, actor, action, Some(id), prior_session.as_deref())?;
             Ok(())
         })
     }
@@ -279,15 +377,20 @@ fn require_lease_tx(conn: &rusqlite::Connection, id: i64, session: &str) -> Resu
     }
 }
 
+/// `session` is which session this audit row is grouped under in the
+/// activity overlay (see migrations/0010_ui_provenance.sql) -- usually
+/// but not always the same session as `actor` names by client string; see
+/// `release_lease_as`'s doc comment for the one case they diverge.
 fn record_audit_tx(
     conn: &rusqlite::Connection,
     actor: &str,
     action: &str,
     capture_id: Option<i64>,
+    session: Option<&str>,
 ) -> Result<()> {
     conn.execute(
-        "INSERT INTO audit (at, actor, action, capture_id) VALUES (?1, ?2, ?3, ?4)",
-        params![now_iso(), actor, action, capture_id],
+        "INSERT INTO audit (at, actor, action, capture_id, session_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![now_iso(), actor, action, capture_id, session],
     )?;
     Ok(())
 }
@@ -333,6 +436,30 @@ mod tests {
         assert!(
             second.is_none(),
             "a leased item must not be handed out again"
+        );
+    }
+
+    #[test]
+    fn held_capture_counts_groups_by_session_and_omits_unleased_sessions() {
+        let store = Store::open_in_memory().unwrap();
+        let a = store.capture("a", None).unwrap();
+        let b = store.capture("b", None).unwrap();
+        let c = store.capture("c", None).unwrap();
+        store.promote(a.id).unwrap();
+        store.promote(b.id).unwrap();
+        store.promote(c.id).unwrap();
+
+        store.queue_take(None, None, &identity("s1")).unwrap();
+        store.queue_take(None, None, &identity("s1")).unwrap();
+        store.queue_take(None, None, &identity("s2")).unwrap();
+
+        let counts = store.held_capture_counts().unwrap();
+        assert_eq!(counts.get("s1"), Some(&2));
+        assert_eq!(counts.get("s2"), Some(&1));
+        assert_eq!(
+            counts.len(),
+            2,
+            "a session with no leases must not appear at all"
         );
     }
 
@@ -433,15 +560,12 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let a = store.capture("main only", None).unwrap();
         store.promote(a.id).unwrap();
-        store
-            .with_conn(|conn| {
-                conn.execute(
-                    "UPDATE captures SET branch = 'main' WHERE id = ?1",
-                    params![a.id],
-                )?;
-                Ok(())
-            })
-            .unwrap();
+        // `pin_to_branch` is the writer for this column -- see
+        // migrations/0010_ui_provenance.sql, which added it as the
+        // missing counterpart to the read-path (`queue_take`/`queue_peek`)
+        // that has honored `branch` since 0001_init.sql.
+        let pinned = store.pin_to_branch(a.id, Some("main")).unwrap();
+        assert_eq!(pinned.branch.as_deref(), Some("main"));
 
         let on_feature_branch = store
             .queue_take(None, Some("feature-x"), &identity("s1"))
@@ -558,7 +682,6 @@ mod tests {
             .unwrap();
 
         assert!(handed_back.lease_session.is_none());
-        assert!(handed_back.lease_head_commit.is_none());
         assert_eq!(
             handed_back.handback_note.as_deref(),
             Some("not sure this is right")
@@ -568,6 +691,95 @@ mod tests {
         assert!(handed_back.needs_review());
         assert!(handed_back.in_now(), "a handed-back item stays in Now");
         assert!(handed_back.done_at.is_none());
+    }
+
+    #[test]
+    fn capture_handback_preserves_lease_head_commit_for_the_review_sheet() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.promote(c.id).unwrap();
+        store.queue_take(None, None, &identity("sess-1")).unwrap();
+        store
+            .record_lease_head_commit(c.id, "sess-1", "deadbeef")
+            .unwrap();
+
+        let handed_back = store
+            .capture_handback(c.id, "sess-1", "note", Some("+1 -1"))
+            .unwrap();
+
+        assert_eq!(
+            handed_back.lease_head_commit.as_deref(),
+            Some("deadbeef"),
+            "unlike every other lease-ending path, a hand-back must keep \
+             the commit a review sheet needs to open the real diff"
+        );
+    }
+
+    #[test]
+    fn send_back_for_rework_clears_review_fields_and_is_retakeable() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.promote(c.id).unwrap();
+        store.queue_take(None, None, &identity("sess-1")).unwrap();
+        store
+            .record_lease_head_commit(c.id, "sess-1", "deadbeef")
+            .unwrap();
+        store
+            .capture_handback(
+                c.id,
+                "sess-1",
+                "needs a decision, not a change",
+                Some("+3 -1"),
+            )
+            .unwrap();
+        assert!(store.queue_peek(None, None, 10).unwrap().is_empty());
+
+        let sent_back = store.send_back_for_rework(c.id, "you").unwrap();
+
+        assert!(sent_back.handback_note.is_none());
+        assert!(sent_back.diff_stat.is_none());
+        assert!(sent_back.handback_at.is_none());
+        assert!(
+            sent_back.lease_head_commit.is_none(),
+            "stale once sent back -- the next lease sets a fresh one"
+        );
+        assert!(!sent_back.needs_review());
+        assert!(
+            sent_back.in_now(),
+            "still in Now, not dropped from the queue"
+        );
+        assert!(sent_back.lease_session.is_none(), "still unleased");
+
+        let retaken = store.queue_take(None, None, &identity("sess-2")).unwrap();
+        assert_eq!(
+            retaken.map(|c| c.id),
+            Some(c.id),
+            "visible to queue_take again now that handback_at is cleared"
+        );
+    }
+
+    #[test]
+    fn send_back_for_rework_records_a_human_audited_action() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.promote(c.id).unwrap();
+        store.queue_take(None, None, &identity("sess-1")).unwrap();
+        store
+            .capture_handback(c.id, "sess-1", "note", None)
+            .unwrap();
+
+        store.send_back_for_rework(c.id, "you").unwrap();
+
+        let entries = store.list_audit(10).unwrap();
+        let entry = entries
+            .iter()
+            .find(|e| e.action == "handback_returned_to_queue")
+            .expect("send_back_for_rework must write its own audit action");
+        assert_eq!(entry.actor, "you");
+        assert_eq!(entry.capture_id, Some(c.id));
     }
 
     #[test]
@@ -671,5 +883,49 @@ mod tests {
 
         assert!(store.get_capture(a.id).unwrap().lease_head_commit.is_none());
         assert!(store.get_capture(b.id).unwrap().lease_head_commit.is_none());
+    }
+
+    #[test]
+    fn revoke_lease_clears_it_and_records_the_real_actor() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.promote(c.id).unwrap();
+        store.queue_take(None, None, &identity("sess-1")).unwrap();
+        assert!(store.get_capture(c.id).unwrap().is_leased());
+
+        store.revoke_lease(c.id, "you").unwrap();
+
+        let capture = store.get_capture(c.id).unwrap();
+        assert!(!capture.is_leased(), "the lease must actually be gone");
+
+        // The whole point of `revoke_lease` existing alongside
+        // `release_lease`: a human revoke must never show up in the audit
+        // log as "dead-pid-sweep" (see release_lease_as's doc comment).
+        let entries = store.list_audit(10).unwrap();
+        let revoke = entries
+            .iter()
+            .find(|e| e.action == "lease_revoked_by_human")
+            .expect("revoke_lease must write its own audit action");
+        assert_eq!(revoke.actor, "you");
+        assert_eq!(
+            revoke.session_id.as_deref(),
+            Some("sess-1"),
+            "grouped under the session that HAD held it, not actor-less"
+        );
+    }
+
+    #[test]
+    fn revoke_lease_is_retakeable_immediately_after() {
+        let store = Store::open_in_memory().unwrap();
+        store.create_session("sess-1", 111, None, None).unwrap();
+        let c = store.capture("do the thing", None).unwrap();
+        store.promote(c.id).unwrap();
+        store.queue_take(None, None, &identity("sess-1")).unwrap();
+
+        store.revoke_lease(c.id, "you").unwrap();
+
+        let retaken = store.queue_take(None, None, &identity("sess-2")).unwrap();
+        assert_eq!(retaken.map(|c| c.id), Some(c.id));
     }
 }
