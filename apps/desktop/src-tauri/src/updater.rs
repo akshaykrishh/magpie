@@ -15,16 +15,11 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 use time::format_description::well_known::Rfc3339;
 
 /// How long after launch the first background check fires.
-// Not read yet -- the background loop that consumes this is added in the
-// next task (Chunk 2 Task 3), on top of this module.
-#[allow(dead_code)]
 const INITIAL_CHECK_DELAY: Duration = Duration::from_secs(60);
 /// How often the background loop wakes to re-evaluate whether a check is
 /// due and whether onboarding/auto-check just became true -- deliberately
 /// much shorter than CHECK_INTERVAL, so completing onboarding or flipping
 /// `update_auto_check` mid-session takes effect without a restart.
-// Not read yet -- same background loop as INITIAL_CHECK_DELAY, above.
-#[allow(dead_code)]
 const POLL_INTERVAL: Duration = Duration::from_secs(5 * 60);
 /// The actual throttle window between real checks.
 const CHECK_INTERVAL_HOURS: i64 = 6;
@@ -40,9 +35,6 @@ type CmdResult<T> = Result<T, String>;
 /// "store the due time, not the last time" trick `quiet_until` already
 /// uses -- this repo has no helper for "parse a stored past timestamp and
 /// add hours to it," and doesn't need one.
-// Only called from this module's own tests for now -- the background loop
-// that calls it for real is added in the next task (Chunk 2 Task 3).
-#[allow(dead_code)]
 pub(crate) fn check_is_due(store: &magpie_core::Store) -> bool {
     match store.get_setting("update_next_check_at") {
         Ok(Some(next)) => magpie_core::now_iso().as_str() >= next.as_str(),
@@ -381,14 +373,50 @@ pub fn unskip_update_version(app: AppHandle) -> CmdResult<()> {
     Ok(())
 }
 
-/// Manages `UpdaterState`. Called once from `lib.rs`'s `setup()`. Does NOT
-/// start the background loop -- that's added in the next task, on top of
-/// this same function.
+/// Manages `UpdaterState` and spawns the background check loop -- mirrors
+/// tray.rs's `init_tray`, which spawns its own poll thread internally
+/// rather than lib.rs orchestrating it. Uses `tauri::async_runtime::spawn`
+/// (not `std::thread::spawn`, unlike the purge-sweep/tray-poll threads),
+/// since `check()` is async.
 pub(crate) fn init(app: &AppHandle) {
     app.manage(UpdaterState {
         status: Mutex::new(UpdateStatus::Idle),
         pending: Mutex::new(None),
     });
+
+    let app_for_loop = app.clone();
+    tauri::async_runtime::spawn(background_loop(app_for_loop));
+}
+
+/// Waits ~60s after launch, then re-checks roughly every 6 hours --
+/// "roughly" because the throttle is driven by the persisted
+/// `update_next_check_at` (see `check_is_due`), not a fixed in-process
+/// timer, and because `onboarding_complete`/`update_auto_check` are
+/// re-read on every tick rather than gated once at startup: completing
+/// onboarding, or flipping the auto-check setting, mid-session takes
+/// effect within one `POLL_INTERVAL`, not only after a restart.
+async fn background_loop(app: AppHandle) {
+    tokio::time::sleep(INITIAL_CHECK_DELAY).await;
+    loop {
+        let state = app.state::<crate::state::AppState>();
+        let store = &state.store;
+        let onboarding_complete = store
+            .get_setting("onboarding_complete")
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some("true");
+        let auto_check_on = store
+            .get_setting("update_auto_check")
+            .ok()
+            .flatten()
+            .as_deref()
+            != Some("off");
+        if onboarding_complete && auto_check_on && check_is_due(store) {
+            run_check(&app).await;
+        }
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
 }
 
 #[cfg(test)]

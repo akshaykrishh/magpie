@@ -238,4 +238,6 @@ export type SettingKey =
   | "clipboard_only_capture_count"
   | "permission_offer_dismissed"
   | "onboarding_complete"
-  | "pinned_project_id";
+  | "pinned_project_id"
+  | "update_auto_check"
+  | "update_skipped_version";

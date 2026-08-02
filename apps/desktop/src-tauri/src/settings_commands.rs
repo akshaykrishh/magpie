@@ -145,7 +145,10 @@ pub fn set_hotkey(
 ///
 /// `capture_hotkey`/`screenshot_hotkey` are intentionally excluded --
 /// those are written only through the validated `set_hotkey` path above,
-/// never through this generic one.
+/// never through this generic one. `update_last_checked_at` and
+/// `update_next_check_at` (updater.rs) are excluded for the same reason:
+/// written internally by Rust, surfaced to the frontend only via
+/// `get_update_status`, never settable directly.
 const SETTING_KEYS: &[&str] = &[
     "theme",
     "now_cap",
@@ -155,6 +158,8 @@ const SETTING_KEYS: &[&str] = &[
     "permission_offer_dismissed",
     "onboarding_complete",
     "pinned_project_id",
+    "update_auto_check",
+    "update_skipped_version",
 ];
 
 fn check_setting_key(key: &str) -> CmdResult<()> {
