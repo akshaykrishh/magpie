@@ -109,14 +109,21 @@ fn set_status(app: &AppHandle, status: UpdateStatus) {
 }
 
 /// Atomically checks-and-sets `Checking` under one lock acquisition, so
-/// the manual "Check for updates" button and the background timer firing
-/// at the same moment can't both start a check -- the loser's `run_check`
-/// call becomes a no-op instead of racing a second concurrent network
-/// request and clobbering the first one's result.
+/// the manual "Check for updates" button and the background timer can't
+/// both start a check while one is already in flight (`Checking`) or a
+/// download is actively downloading -- the loser's `run_check` call
+/// becomes a no-op instead of racing a second concurrent network request
+/// (or a second concurrent download of the same version) and clobbering
+/// the first one's result. Does not by itself prevent every lifecycle
+/// race past this point; see `download_pending_update`'s own
+/// version-match guard for the rest.
 fn try_start_check(app: &AppHandle) -> bool {
     let state = app.state::<UpdaterState>();
     let mut status = state.status.lock().unwrap();
-    if matches!(&*status, UpdateStatus::Checking) {
+    if matches!(
+        &*status,
+        UpdateStatus::Checking | UpdateStatus::Downloading { .. }
+    ) {
         return false;
     }
     *status = UpdateStatus::Checking;
@@ -177,6 +184,28 @@ pub(crate) async fn run_check(app: &AppHandle) {
             let notes = update.body.clone();
             let pub_date = update.date.and_then(|d| d.format(&Rfc3339).ok());
             let skipped_version = store.get_setting("update_skipped_version").ok().flatten();
+
+            // If the exact same version is already fully downloaded and
+            // sitting in `pending`, don't discard those bytes and
+            // re-download for no reason -- just re-affirm whichever status
+            // (Ready or Skipped) already applies.
+            let already_ready = {
+                let state = app.state::<UpdaterState>();
+                let pending = state.pending.lock().unwrap();
+                matches!(
+                    pending.as_ref(),
+                    Some(PendingUpdate { update: u, bytes: Some(_) }) if u.version == version
+                )
+            };
+
+            if already_ready {
+                if skipped_version.as_deref() == Some(version.as_str()) {
+                    set_status(app, UpdateStatus::Skipped { version });
+                } else {
+                    set_status(app, UpdateStatus::Ready { version, notes });
+                }
+                return;
+            }
 
             *app.state::<UpdaterState>().pending.lock().unwrap() = Some(PendingUpdate {
                 update: update.clone(),
@@ -255,10 +284,35 @@ async fn download_pending_update(app: &AppHandle) {
         Ok(bytes) => {
             let notes = update.body.clone();
             let state = app.state::<UpdaterState>();
-            if let Some(pending) = state.pending.lock().unwrap().as_mut() {
+            let store = &app.state::<crate::state::AppState>().store;
+
+            // The pending update (or the skip setting) may have changed
+            // while this download was in flight -- e.g. a newer check
+            // superseded it, or the user clicked "Skip this version"
+            // after the download had already started (it starts the
+            // instant Available is set, before any click could beat it).
+            // Only finalize if what's currently pending is still *this*
+            // version; drop the bytes otherwise rather than overwriting a
+            // different pending update's state.
+            let mut pending_guard = state.pending.lock().unwrap();
+            let still_current = matches!(
+                pending_guard.as_ref(),
+                Some(p) if p.update.version == version
+            );
+            if !still_current {
+                return;
+            }
+            if let Some(pending) = pending_guard.as_mut() {
                 pending.bytes = Some(bytes);
             }
-            set_status(app, UpdateStatus::Ready { version, notes });
+            drop(pending_guard);
+
+            let skipped_version = store.get_setting("update_skipped_version").ok().flatten();
+            if skipped_version.as_deref() == Some(version.as_str()) {
+                set_status(app, UpdateStatus::Skipped { version });
+            } else {
+                set_status(app, UpdateStatus::Ready { version, notes });
+            }
         }
         Err(e) => {
             // Falls back to Available, not Failed -- the update is still
@@ -390,6 +444,17 @@ pub(crate) fn init(app: &AppHandle) {
         status: Mutex::new(UpdateStatus::Idle),
         pending: Mutex::new(None),
     });
+
+    // Unsupported is a static, environment-determined fact (AppImage vs.
+    // .deb) that can't change during the process's lifetime -- gate the
+    // background loop from ever starting at all instead of letting it spin
+    // forever re-detecting the same permanent state (see `run_check`'s own
+    // `detect_unsupported` check, left in place as cheap defense-in-depth
+    // for any future direct caller that skips `init`).
+    if let Some(reason) = detect_unsupported(app) {
+        set_status(app, UpdateStatus::Unsupported { reason });
+        return;
+    }
 
     let app_for_loop = app.clone();
     tauri::async_runtime::spawn(background_loop(app_for_loop));
