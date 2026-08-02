@@ -88,7 +88,7 @@ jobs:
       - name: Guard against hardcoded accent hex outside tokens.css
         working-directory: apps/desktop/src
         run: |
-          if grep -rn '3E7A92\|3e7a92\|123A4B\|123a4b' . --include='*.ts' --include='*.tsx' --include='*.css' --include='*.html' | grep -v '^styles/tokens.css'; then
+          if grep -rn '3E7A92\|3e7a92\|123A4B\|123a4b' . --include='*.ts' --include='*.tsx' --include='*.css' --include='*.html' | grep -v 'styles/tokens\.css:'; then
             echo "::error::Hardcoded accent hex found outside styles/tokens.css -- use var(--mp-accent) (or tokens.css's --mp-accent-on-light/-on-dark for the rare fixed-color case) instead."
             exit 1
           fi
