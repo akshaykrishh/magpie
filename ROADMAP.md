@@ -27,23 +27,25 @@ Usable today, on `main` unless noted:
 - **Capture list v2** — sections, soft-delete with real Undo and Recently
   Deleted, Markdown rendering, a context-menu interaction model (Copy, Copy
   as List, Edit, Move to Project/Section, Merge, Delete), keyboard-first
-  navigation, and remappable global hotkeys. Complete on
-  `worktree-capture-list-v2`, pending merge to `main`.
+  navigation, and remappable global hotkeys. Folded into the redesign below
+  rather than merged on its own.
+- **The "3a canonical" redesign** — two-theme Slate/Paper token layer, the
+  main window rebuilt around a session strip and one overlay stack instead
+  of a tab bar, hold-to-aim (hold the capture hotkey to redirect a filing
+  guess instead of only confirm-or-ignore), and Across (⌘⌥K), the
+  cross-project "what needs a look" rollup. Complete on `redesign/slate`,
+  PR open against `main`.
 
 ## Next
 
-- **Merge capture list v2 to `main`**
-- **Across (⌘⌥K)** — the cross-project "what needs a look" rollup. The
-  backend read (`list_projects_overview`) already exists and is exposed
-  over Tauri; no UI consumes it yet. This is the actual next frontend
-  surface, and several other things below are sequenced behind it rather
-  than in parallel, because they'd otherwise ship with nowhere to be seen.
-- **Real Edit-in-New-Window** — capture list v2 shipped this as an Expand-
-  modal stub; a real second Tauri window is its own scoped follow-up.
+- **Real Edit-in-New-Window** — the redesign's Expand modal is still a
+  stub; a real second Tauri window is its own scoped follow-up.
 - **Linux, on real hardware** — the full suite passes in CI, but nobody has
   run the desktop app itself on a Linux machine yet. X11 and Wayland (KDE
   and GNOME) both need first-hand verification before Linux can be called
-  done rather than "type-checks."
+  done rather than "type-checks" — the redesign's floating panels
+  (toast/aim/across) specifically rest on a macOS NSPanel technique whose
+  Linux fallback (plain window show/hide) hasn't been checked at all.
 - **Code signing and notarization** — CI ships unsigned artifacts today.
   Needed before a real v1: unsigned builds revoke macOS Accessibility
   grants on every update, silently breaking one-key capture for anyone who
@@ -52,15 +54,12 @@ Usable today, on `main` unless noted:
   back open items it noticed but didn't act on (`capture_followup`), folded
   into that session's digest rather than adding rows, surfaced as a count
   on Across and closed the same way anything else is closed. Designed, not
-  started — deliberately parked until Across ships, since a write path
-  with nothing surfacing it is clutter with the appearance of a feature.
+  started — no longer blocked now that Across has shipped.
 
 ## Later
 
 Plausible, not scoped:
 
-- **"Hold to aim"** — a keyboard-driven picker to redirect a filing guess to
-  a different project, instead of only confirm-or-ignore
 - **Deleting a project** — what happens to its captures, `Now` items, and
   sessions is a real design question capture list v2 deliberately didn't
   answer while shipping item-level deletion
