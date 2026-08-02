@@ -95,6 +95,9 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        // No .pubkey(...)/.endpoints(...) overrides -- both come from
+        // tauri.conf.json's plugins.updater block above.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin({
             tauri_plugin_global_shortcut::Builder::new()
                 .with_shortcuts([

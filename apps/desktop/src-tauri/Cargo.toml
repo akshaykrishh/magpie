@@ -22,11 +22,20 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-updater = "2"
 serde.workspace = true
 serde_json.workspace = true
 magpie-core.workspace = true
 magpie-capture.workspace = true
 base64 = "0.22"
+# Formats Update.date (an OffsetDateTime) as RFC3339 for the frontend --
+# mirrors tauri-plugin-updater's own commands.rs, which does the same
+# formatting for its (unused here) JS-facing check command.
+time = { version = "0.3", features = ["formatting"] }
+# Just the `time` feature: the background update-check loop needs an
+# async sleep inside a tauri::async_runtime::spawn task (unlike the
+# purge-sweep/tray-poll threads, which are synchronous std::thread loops).
+tokio = { version = "1", features = ["time"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-global-shortcut = "2"
