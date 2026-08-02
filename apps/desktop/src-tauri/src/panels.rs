@@ -54,6 +54,7 @@ pub use tauri_nspanel::WebviewWindowExt as PanelWebviewWindowExt;
 /// only wins ordering within this app's own windows and the panel can
 /// still end up behind whatever other application is currently frontmost.
 /// This is what actually makes "float over whatever app you're in" true.
+#[cfg(target_os = "macos")]
 const NS_FLOATING_WINDOW_LEVEL: i64 = 3;
 
 /// Converts `label`'s already-declared window into a non-activating
