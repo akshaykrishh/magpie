@@ -10,6 +10,7 @@ mod settings_commands;
 mod state;
 mod toast;
 mod tray;
+mod updater;
 
 use std::sync::Mutex;
 
@@ -95,6 +96,9 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        // No .pubkey(...)/.endpoints(...) overrides -- both come from
+        // tauri.conf.json's plugins.updater block above.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin({
             tauri_plugin_global_shortcut::Builder::new()
                 .with_shortcuts([
@@ -193,6 +197,11 @@ pub fn run() {
             commands::select_across_project,
             commands::hide_across,
             commands::toggle_across,
+            updater::get_update_status,
+            updater::check_for_updates,
+            updater::install_update,
+            updater::skip_update_version,
+            updater::unskip_update_version,
         ])
         .on_window_event(|window, event| {
             if matches!(window.label(), "main" | "dock" | "settings") {
@@ -247,6 +256,15 @@ pub fn run() {
             toast::init_toast_panel(app.handle());
             aim::init_aim_panel(app.handle());
             across::init_across_panel(app.handle());
+            // `updater::init` must run before `tray::init_tray`: the tray's
+            // initial menu build (`rebuild_tray_menu_for`) reads
+            // `UpdaterState` via `updater::current_status` synchronously
+            // during `init_tray`, which panics ("state() called before
+            // manage()") unless `updater::init`'s `app.manage(UpdaterState
+            // {...})` has already run. `updater::init` has no reverse
+            // dependency on the tray -- it only manages state and spawns an
+            // independent async background-check loop.
+            updater::init(app.handle());
             tray::init_tray(app.handle())?;
 
             Ok(())

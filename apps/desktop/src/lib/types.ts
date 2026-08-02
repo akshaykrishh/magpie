@@ -238,4 +238,26 @@ export type SettingKey =
   | "clipboard_only_capture_count"
   | "permission_offer_dismissed"
   | "onboarding_complete"
-  | "pinned_project_id";
+  | "pinned_project_id"
+  | "update_auto_check"
+  | "update_skipped_version";
+
+// Mirrors updater.rs's `UpdateStatus` (`#[serde(tag = "kind", rename_all
+// = "snake_case")]`) -- every field name is the Rust struct's own field
+// name verbatim, since serde's `rename_all` only renames variant tags,
+// not field names.
+export type UpdateStatus =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "up_to_date"; checked_at: string }
+  | {
+      kind: "available";
+      version: string;
+      notes: string | null;
+      pub_date: string | null;
+    }
+  | { kind: "downloading"; downloaded: number; total: number | null }
+  | { kind: "ready"; version: string; notes: string | null }
+  | { kind: "skipped"; version: string }
+  | { kind: "unsupported"; reason: string }
+  | { kind: "failed"; message: string; checked_at: string };

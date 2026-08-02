@@ -83,10 +83,10 @@
         "label": "settings",
         "title": "magpie — Settings",
         "url": "settings.html",
-        "width": 420,
-        "height": 320,
-        "minWidth": 360,
-        "minHeight": 280,
+        "width": 460,
+        "height": 420,
+        "minWidth": 400,
+        "minHeight": 360,
         "visible": false,
         "decorations": true,
         "resizable": true
@@ -112,5 +112,13 @@
     "longDescription": "An open-source capture tool for people working across ChatGPT, Claude, Cursor, and agent CLIs. Runs on macOS and Linux. Agents can read and write your queue over MCP.",
     "copyright": "Copyright the magpie contributors",
     "homepage": "https://github.com/akshaykrishh/magpie"
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/akshaykrishh/magpie/releases/latest/download/latest.json"
+      ],
+      "pubkey": "REPLACE_ME_BEFORE_FIRST_RELEASE"
+    }
   }
 }

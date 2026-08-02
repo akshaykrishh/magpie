@@ -49,6 +49,7 @@ pub fn init_tray(app: &AppHandle) -> tauri::Result<()> {
             "settings" => show_settings_window(app),
             "now" | "unfiled" => show_main_window(app),
             "across" => crate::across::toggle(app),
+            "update" => show_settings_window(app),
             "quiet_toggle" => {
                 toggle_quiet(app);
                 rebuild_tray_menu(app);
@@ -78,6 +79,8 @@ pub fn init_tray(app: &AppHandle) -> tauri::Result<()> {
     app.listen("now:changed", move |_| rebuild_tray_menu(&now_handle));
     let capture_handle = app.clone();
     app.listen("capture:added", move |_| rebuild_tray_menu(&capture_handle));
+    let update_handle = app.clone();
+    app.listen("update:status", move |_| rebuild_tray_menu(&update_handle));
 
     let poll_handle = app.clone();
     std::thread::spawn(move || loop {
@@ -92,7 +95,7 @@ fn tray_icon(app: &AppHandle) -> Option<TrayIcon> {
     app.tray_by_id(TRAY_ID)
 }
 
-fn rebuild_tray_menu(app: &AppHandle) {
+pub(crate) fn rebuild_tray_menu(app: &AppHandle) {
     if let Some(tray) = tray_icon(app) {
         rebuild_tray_menu_for(app, &tray);
     }
@@ -108,6 +111,41 @@ fn rebuild_tray_menu_for(app: &AppHandle, tray: &TrayIcon) {
     let store = &state.store;
 
     let mut items: Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>> = Vec::new();
+
+    // Earned, at the very top: absent for every state except an update
+    // actually being ready or downloading -- a transient network failure
+    // (Failed) has no business in a menu bar, it surfaces in Settings
+    // only. Downloading is shown-but-disabled (no click target while a
+    // download is in flight); Ready is the only clickable "go install"
+    // entry point from the tray, and it just opens Settings -- see the
+    // release-pipeline design doc's "never relaunch without the person
+    // seeing what's in the update first."
+    match crate::updater::current_status(app) {
+        crate::updater::UpdateStatus::Ready { version, .. } => {
+            if let Ok(item) = MenuItem::with_id(
+                app,
+                "update",
+                format!("Update to {version}"),
+                true,
+                None::<&str>,
+            ) {
+                items.push(Box::new(item));
+            }
+        }
+        crate::updater::UpdateStatus::Downloading { downloaded, total } => {
+            let label = match total {
+                Some(total) if total > 0 => {
+                    let pct = (downloaded as f64 / total as f64 * 100.0).round() as u32;
+                    format!("Downloading update… {pct}%")
+                }
+                _ => "Downloading update…".to_string(),
+            };
+            if let Ok(item) = MenuItem::with_id(app, "update", label, false, None::<&str>) {
+                items.push(Box::new(item));
+            }
+        }
+        _ => {}
+    }
 
     // Project + branch header -- an explicit pin wins, otherwise the same
     // "exactly one project has a live session" derivation the main
