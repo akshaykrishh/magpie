@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to (re-)run the release pipeline for, e.g. v0.1.0"
+        required: true
+
+jobs:
+  guard:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.compute.outputs.version }}
+      previous_tag: ${{ steps.compute.outputs.previous_tag }}
+      macos_enabled: ${{ steps.compute.outputs.macos_enabled }}
+      matrix: ${{ steps.compute.outputs.matrix }}
+    steps:
+      - name: Resolve the tag
+        id: tag
+        run: echo "tag=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Check release invariants
+        run: scripts/check-release-invariants.sh "${{ steps.tag.outputs.tag }}"
+
+      # A tag pushed against a branch that never merged to main (or a stale
+      # local branch) must never reach a real release -- this is the guard
+      # against cutting a release from code nobody reviewed on the trunk.
+      - name: Assert the tag's commit is on main
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::${{ steps.tag.outputs.tag }}'s commit is not on main -- refusing to release from an unmerged branch."
+            exit 1
+          fi
+
+      - name: Compute version, previous tag, macOS gating, and build matrix
+        id: compute
+        run: |
+          tag="${{ steps.tag.outputs.tag }}"
+          version="${tag#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          # Most recent *other* tag, by creation date -- empty for the very
+          # first release, which the create-release job's changelog-compare
+          # line handles explicitly rather than producing a broken link.
+          previous_tag=$(git tag --sort=-creatordate | grep -v "^${tag}$" | head -1 || true)
+          echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ vars.MACOS_RELEASE_ENABLED }}" = "true" ]; then
+            echo "macos_enabled=true" >> "$GITHUB_OUTPUT"
+            echo 'matrix=[{"os":"ubuntu-22.04","platform":"linux"},{"os":"macos-latest","platform":"macos"}]' >> "$GITHUB_OUTPUT"
+          else
+            echo "macos_enabled=false" >> "$GITHUB_OUTPUT"
+            echo 'matrix=[{"os":"ubuntu-22.04","platform":"linux"}]' >> "$GITHUB_OUTPUT"
+          fi
+
+  create-release:
+    needs: guard
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.create-or-reuse.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.guard.outputs.tag }}
+
+      - name: Build the release body
+        run: |
+          tag="${{ needs.guard.outputs.tag }}"
+          version="${{ needs.guard.outputs.version }}"
+          previous_tag="${{ needs.guard.outputs.previous_tag }}"
+
+          {
+            scripts/extract-changelog.sh "$version"
+            echo
+            if [ -n "$previous_tag" ]; then
+              echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${previous_tag}...${tag}"
+            fi
+            if [ "${{ needs.guard.outputs.macos_enabled }}" != "true" ]; then
+              echo
+              echo "_macOS builds aren't attached to this release yet -- code signing isn't set up. Linux only for now._"
+            fi
+          } > /tmp/release-body.md
+
+      # /tmp/release-body.md is passed directly to --notes-file below (same
+      # job, same runner filesystem) -- no need to round-trip it through a
+      # GITHUB_OUTPUT variable just to read it back one step later.
+
+      # Self-healing for workflow_dispatch retries: a prior run's build job
+      # can fail after this job already created the draft. None found ->
+      # create fresh. Found and still a draft -> delete it first, then
+      # create fresh (safe: a draft is never externally visible, and this
+      # means build's asset uploads and checksums-and-attest's downloads
+      # never need their own dedup/clobber logic). Found and already
+      # published -> hard-fail; this case must never auto-delete, since a
+      # published release may already be downloaded/depended on.
+      - name: Create or reuse the draft release
+        id: create-or-reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ needs.guard.outputs.tag }}"
+          existing_json=$(gh release view "$tag" --json databaseId,isDraft 2>/dev/null || true)
+
+          if [ -n "$existing_json" ]; then
+            is_draft=$(echo "$existing_json" | jq -r .isDraft)
+            if [ "$is_draft" != "true" ]; then
+              echo "::error::$tag was already released; re-running won't touch a published release -- cut a new patch version instead."
+              exit 1
+            fi
+            gh release delete "$tag" --yes
+          fi
+
+          # Runs whether a stale draft was just deleted above or nothing
+          # existed at all -- both cases start fresh from here. GitHub
+          # Actions' default bash shell runs with `-e`, so a failing
+          # `gh release create` already aborts this step; no manual `|| exit
+          # 1` needed.
+          gh release create "$tag" --draft --notes-file /tmp/release-body.md --title "$tag"
+
+          release_id=$(gh release view "$tag" --json databaseId --jq .databaseId)
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
