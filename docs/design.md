@@ -419,8 +419,11 @@ Public repo from M1 — a repo nobody can see attracts nobody.
 - **The Windows `CaptureBackend` stub is the flagship good-first-issue** — a clean trait, a
   documented stub, and a passing test harness is the best contributor magnet available.
 
-**Signing:** develop with a stable self-signed identity so your own Accessibility grant survives
-rebuilds. Buy the Apple Developer ID ($99/yr) and wire notarization into CI when cutting `v0.1`.
+**Signing:** development happens with a stable self-signed identity so a local Accessibility
+grant survives rebuilds. Linux releases are signed with a real Ed25519 updater key today
+(`.github/workflows/release.yml`'s `build` job, gated on nothing) and auto-update in place. macOS
+releases are wired into the same pipeline but gated behind the `MACOS_RELEASE_ENABLED` repo
+variable, unset until the Apple Developer ID ($99/yr) is purchased and notarization is wired in.
 The reason isn't the scary dialog — macOS binds Accessibility grants to a signature, so unsigned
 builds revoke the grant on **every update**, silently disabling one-key capture for the users who
 upgrade most. Linux needs none of this.

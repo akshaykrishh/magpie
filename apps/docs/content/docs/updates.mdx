@@ -1,0 +1,64 @@
+---
+title: Updates
+description: Learn what the in-app updater checks, what it sends, and how to turn it off.
+---
+
+## What leaves your machine
+
+The update check is the *only* network request magpie makes on its own.
+It's a plain HTTPS `GET` for one static JSON file —
+`https://github.com/akshaykrishh/magpie/releases/latest/download/latest.json`
+— with no query parameters, no device ID, no telemetry, and no analytics.
+There's nothing else to opt out of, because there's nothing else magpie
+sends.
+
+If you'd rather it never even makes that request, uncheck "Automatically
+check for updates" in Settings → About. You can still check manually
+whenever you want with the "Check for updates" button there — the only
+difference is whether it happens on its own every 6 hours in the
+background.
+
+## How checking works
+
+- A background check runs at most once every 6 hours, tracked by a
+  persisted `update_next_check_at` timestamp — not a fixed in-process
+  timer, so it survives the app being closed and reopened.
+- A found update is briefly "available" — this is when "Skip this
+  version" is offered, if you'd rather not be reminded about that
+  particular release — and a background download kicks off automatically,
+  no click needed to start it. While it's downloading, Settings → About
+  shows "Downloading X.Y.Z…" and the tray menu shows a generic
+  "Downloading update… N%" item (no version number there).
+- Once the download finishes, status becomes "ready": Settings → About
+  shows "X.Y.Z is ready to install." next to an explicit "Install and
+  relaunch" button — the only click required anywhere in this flow — and
+  the tray menu shows a clickable "Update to X.Y.Z" item too. magpie
+  never relaunches itself without you choosing to.
+- "Release notes" next to the version number links out to that version's
+  real GitHub release page — the same page `RELEASING.md`'s changelog
+  process writes.
+
+## Versioning, in user terms
+
+magpie follows [Semantic Versioning](https://semver.org/), with one
+pre-1.0 caveat: before `1.0`, a breaking change bumps the *minor* version
+(`0.4.0` → `0.5.0`) instead of waiting for a major version that doesn't
+exist yet. There's no way to opt into early-access or release-candidate
+builds through the updater — every release is either the latest stable
+version, or not offered yet. (Anyone who wants a build ahead of a tagged
+release can grab one from CI directly — see
+[Installation](/docs/installation)'s "Development builds" section — but
+that path is unsigned and doesn't self-update.)
+
+## Why installs never relaunch on their own, and why `.deb` installs don't check for updates
+
+Every install requires an explicit "Install and relaunch" click — magpie
+never decides on its own that now is a good time to restart and lose
+whatever state you had open.
+
+`.deb` installs don't check for updates at all — magpie can only rewrite
+an `.AppImage` in place, so a `.deb` install shows a fixed note in
+Settings → About telling you to update via your package manager, and
+never checks the release server on its own. Check the
+[releases page](https://github.com/akshaykrishh/magpie/releases)
+yourself, or switch to the `.AppImage` if you want auto-updates.

@@ -3,6 +3,7 @@
   "pages": [
     "index",
     "installation",
+    "updates",
     "quick-start",
     "concepts",
     "cli",

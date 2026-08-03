@@ -61,12 +61,16 @@ Being specific about this matters more than a general "it works" claim:
 | Screenshots + OCR on macOS | Verified live. A real bug in Vision's per-region text segmentation (misread as spurious line breaks) was found and fixed against a real capture before being considered done. |
 | Full test suite on Linux (Ubuntu CI) | Verified in CI on every push, including the portal/tesseract backend's unit-testable logic. |
 | Screenshot portal + tesseract OCR on a real Linux desktop | **Not yet verified.** Implemented to match the freedesktop portal specification, type-checks against a Linux target, and its pure logic is unit tested -- but nobody has run the interactive flow on an actual Linux session, since CI has no display or portal daemon. |
-| Code signing / notarization | **Not done.** Needs an Apple Developer ID, which is a manual step outside CI -- see below. |
+| Updater signing | **Done.** Every release is signed with a real Ed25519 key; a running app only installs an update whose signature verifies against its own baked-in public key -- see [Updates](/docs/updates) and [SECURITY.md](https://github.com/akshaykrishh/magpie/blob/main/SECURITY.md). |
+| Linux release build | **Done, CI-verified only.** `release.yml`'s `build` job compiles, bundles, and checks the artifact's contents on every tag push -- but nobody has run the actual app on real Linux hardware yet (see [Installation](/docs/installation)). |
+| macOS code signing / notarization | **Not done.** Needs an Apple Developer ID, which is a manual step outside CI -- see below. |
 
 ## Signing
 
 Development happens with a stable self-signed identity so a local Accessibility grant survives
-rebuilds. Real notarization needs an Apple Developer ID ($99/yr), wired into CI once purchased.
-This isn't just a "remove a scary dialog" nicety: macOS ties an Accessibility grant to a binary's
-*signature*, so an unsigned build silently loses one-key capture on every single update -- exactly
-the users who upgrade most. Linux needs none of this.
+rebuilds. Linux releases are signed with a real Ed25519 updater key today and auto-update in
+place -- see [Updates](/docs/updates). macOS releases are wired into the same pipeline but gated
+behind an unset repo variable until the Apple Developer ID ($99/yr) is purchased and notarization
+is wired in. This isn't just a "remove a scary dialog" nicety: macOS ties an Accessibility grant
+to a binary's *signature*, so an unsigned build silently loses one-key capture on every single
+update -- exactly the users who upgrade most. Linux needs none of this.
