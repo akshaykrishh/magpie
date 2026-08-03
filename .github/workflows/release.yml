@@ -213,7 +213,7 @@ jobs:
           projectPath: apps/desktop
           releaseId: ${{ needs.create-release.outputs.release_id }}
           includeUpdaterJson: true
-          args: ${{ matrix.platform == 'macos' && '--target universal-apple-darwin --config src-tauri/tauri.release.conf.json --locked' || '--config src-tauri/tauri.release.conf.json --locked' }}
+          args: ${{ matrix.platform == 'macos' && '--target universal-apple-darwin --config src-tauri/tauri.release.conf.json -- --locked' || '--config src-tauri/tauri.release.conf.json -- --locked' }}
 
       # Artifact integrity, not a GUI launch -- see the master plan's
       # grilling-pass decision on why a real headless launch was rejected
