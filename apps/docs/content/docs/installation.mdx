@@ -1,11 +1,40 @@
 ---
 title: Installation
-description: Build magpie from source, or grab an unsigned build from CI.
+description: Download a signed release, grab an unsigned CI build, or build from source.
 ---
 
-There are no signed releases yet -- real code signing needs an Apple Developer ID, which is a
-manual step outside CI (see [Architecture](/docs/architecture)). Two ways to get a working build
-in the meantime:
+## Download
+
+**Linux** — signed, auto-updating (see [Updates](/docs/updates)). Grab the
+`.AppImage` or `.deb` from the
+[latest release](https://github.com/akshaykrishh/magpie/releases/latest)
+(asset filenames are versioned, e.g. `magpie_0.1.0_amd64.AppImage`, so
+there's no evergreen direct-download link to give here):
+
+- **`.AppImage`** — self-updates in place through the app; no install
+  step, just run it.
+- **`.deb`** — installs system-wide via `dpkg`/`apt`, but **does not
+  self-update** (see [Updates](/docs/updates)) — reinstall a new `.deb` by
+  hand for each release.
+
+**macOS** — not published yet. Code signing and notarization aren't wired
+up (see [Architecture](/docs/architecture)); build from source below in
+the meantime, or watch [ROADMAP.md](https://github.com/akshaykrishh/magpie/blob/main/ROADMAP.md)
+for when a signed `.dmg` and Homebrew cask land.
+
+## Verify
+
+Every release includes `SHA256SUMS` and a build provenance attestation:
+
+```bash
+gh release download vX.Y.Z --repo akshaykrishh/magpie
+sha256sum -c SHA256SUMS
+gh attestation verify magpie_X.Y.Z_amd64.AppImage --repo akshaykrishh/magpie
+```
+
+See [`SECURITY.md`](https://github.com/akshaykrishh/magpie/blob/main/SECURITY.md)
+for what each check does and doesn't prove, and how the update signing key
+itself is protected.
 
 ## Build from source
 
@@ -29,13 +58,19 @@ pnpm tauri build
 The bundle lands in `target/release/bundle/` at the repo root -- this is a Cargo workspace, so
 every crate (including the desktop app) shares one `target/` directory rather than a per-app one.
 
-## Unsigned CI builds
+## Development builds
 
 Every push to `main` builds and bundles the app on both macOS and Ubuntu runners. Unsigned
 artifacts (`.dmg`, `.deb`, `.AppImage`) are attached to each
 [workflow run](https://github.com/akshaykrishh/magpie/actions/workflows/ci.yml) -- useful for
-trying a build without a Rust toolchain, though macOS will still warn about an unidentified
-developer since these aren't notarized.
+trying an unreleased commit without a Rust toolchain. Two things to know before using one:
+
+- These builds **don't self-update** through the in-app updater — they're not part of the signed
+  release pipeline at all, so you'd need to grab a new one by hand each time.
+- On macOS specifically, rebuilding and reinstalling one of these **revokes your Accessibility
+  grant on every rebuild** (see [Architecture](/docs/architecture)'s Signing section) — one-key
+  capture will silently stop working until you re-grant it. This is a real cost of using an
+  unsigned build, not a hypothetical one.
 
 ## The CLI
 
