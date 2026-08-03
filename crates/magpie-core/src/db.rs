@@ -189,21 +189,36 @@ impl Store {
 }
 
 fn migrate(conn: &Connection) -> Result<()> {
-    let current: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    let target = MIGRATIONS.len() as i64;
+    migrate_migrations(conn, MIGRATIONS)
+}
 
-    for (i, (_name, sql)) in MIGRATIONS.iter().enumerate() {
+/// `PRAGMA user_version` writes are transactional in SQLite -- committed or
+/// rolled back together with everything else in the same transaction. That's
+/// what makes bumping it *inside* each migration's own transaction, rather
+/// than once after the whole loop, crash-safe: a process that dies right
+/// after this function returns (or is killed mid-loop) can never leave a
+/// migration's schema change durably applied while `user_version` fails to
+/// reflect it -- the two either both commit together or neither does. The
+/// previous version bumped `user_version` only once, after every pending
+/// migration in the loop had already run and committed -- a process that
+/// died between an individual migration's commit and that final bump left
+/// the schema changed but the counter stale, so the next launch re-ran a
+/// migration whose effects (e.g. `CREATE TABLE`) had already durably
+/// landed. This is exactly what caused a real "table already exists" panic
+/// against a live user database (`user_version` stuck at 8 while the schema
+/// already reflected all 10 migrations).
+fn migrate_migrations(conn: &Connection, migrations: &[(&str, &str)]) -> Result<()> {
+    let current: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+
+    for (i, (_name, sql)) in migrations.iter().enumerate() {
         let version = (i + 1) as i64;
         if version <= current {
             continue;
         }
         let tx = conn.unchecked_transaction()?;
         tx.execute_batch(sql)?;
+        tx.pragma_update(None, "user_version", version)?;
         tx.commit()?;
-    }
-
-    if target > current {
-        conn.pragma_update(None, "user_version", target)?;
     }
 
     Ok(())
@@ -212,6 +227,51 @@ fn migrate(conn: &Connection) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Regression test for a real bug found against a live user database:
+    // the old `migrate()` bumped `user_version` once, after the whole
+    // migration loop finished -- so a migration that runs after an earlier
+    // one commits, but fails itself, left the earlier migration's schema
+    // change durably applied while `user_version` stayed unbumped. The
+    // next launch then tried to re-run that already-applied migration and
+    // hit "table already exists". A real process crash mid-loop is the
+    // same failure shape; this test simulates it deterministically with a
+    // migration that's guaranteed to fail, rather than actually killing a
+    // process mid-transaction.
+    #[test]
+    fn a_failed_later_migration_does_not_strand_an_earlier_commit_behind_a_stale_version() {
+        let conn = Connection::open_in_memory().unwrap();
+        let first_run: &[(&str, &str)] = &[
+            ("t1", "CREATE TABLE t1 (id INTEGER);"),
+            ("bad", "THIS IS NOT VALID SQL;"),
+        ];
+
+        let result = migrate_migrations(&conn, first_run);
+        assert!(result.is_err(), "the invalid migration must fail");
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            version, 1,
+            "t1's commit must be reflected in user_version immediately, not left behind until a later migration also succeeds"
+        );
+
+        // A "restart" against the same connection, now with a corrected
+        // list -- t1 must NOT be re-run (it would fail with "table already
+        // exists" under the old bug, since user_version would have stayed
+        // at 0 even though t1 physically committed).
+        let corrected: &[(&str, &str)] = &[
+            ("t1", "CREATE TABLE t1 (id INTEGER);"),
+            ("t2", "CREATE TABLE t2 (id INTEGER);"),
+        ];
+        migrate_migrations(&conn, corrected).unwrap();
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 2);
+    }
 
     #[test]
     fn migrates_cleanly_and_is_idempotent() {
