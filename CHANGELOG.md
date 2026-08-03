@@ -1,5 +1,19 @@
 # Changelog
 
+All notable changes to magpie are documented here, hand-written, in
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format. This project
+adheres to [Semantic Versioning](https://semver.org/) (see `RELEASING.md` for
+the pre-1.0 caveat).
+
+This file is hand-maintained, not auto-generated from commit messages or PR
+titles. This maintainer's commit history is long-form reasoned prose, not
+Conventional Commits — an auto-generator would flatten exactly what makes
+those messages worth reading into a mechanical one-liner. One piece of
+writing here serves three destinations: this file, the GitHub release body
+(`scripts/extract-changelog.sh` slices out one version's section verbatim),
+and the in-app "Release notes" link Settings → About shows for the installed
+version.
+
 ## [Unreleased]
 
 ## [0.1.0] - 2026-08-03
