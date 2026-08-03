@@ -233,13 +233,18 @@ jobs:
       - name: Verify bundle integrity (Linux)
         if: matrix.platform == 'linux'
         run: |
-          set -e
+          set -ex
           cd target/release/bundle
           appimage=$(find appimage -name '*.AppImage')
+          echo "appimage=$appimage"
+          chmod +x "$appimage"
           "$appimage" --appimage-extract
+          ls -la squashfs-root
           test -x squashfs-root/AppRun
           rm -rf squashfs-root
           deb=$(find deb -name '*.deb')
+          echo "deb=$deb"
+          dpkg-deb --contents "$deb"
           dpkg-deb --contents "$deb" | grep -q 'usr/bin/magpie'
 
       - name: Verify bundle integrity (macOS)
