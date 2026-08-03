@@ -123,8 +123,10 @@ actually run it:
    real Linux hardware (not a CI runner, not headless).
 2. Launch it. Confirm the tray icon appears, the global capture hotkey
    works, and a real screenshot capture (region select + OCR) succeeds.
-3. Also exercise the in-app update path once a newer version exists: age
-   `update_next_check_at` artificially —
+3. Also exercise the in-app update path once a newer version exists (this
+   step needs the `.AppImage` specifically -- a `.deb` install never shows
+   a "Check for updates" option at all; see `updates.mdx`'s explanation of
+   why): age `update_next_check_at` artificially —
 
    ```bash
    sqlite3 ~/.local/share/magpie/magpie.db \

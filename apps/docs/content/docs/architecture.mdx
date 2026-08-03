@@ -68,7 +68,9 @@ Being specific about this matters more than a general "it works" claim:
 ## Signing
 
 Development happens with a stable self-signed identity so a local Accessibility grant survives
-rebuilds. Real notarization needs an Apple Developer ID ($99/yr), wired into CI once purchased.
-This isn't just a "remove a scary dialog" nicety: macOS ties an Accessibility grant to a binary's
-*signature*, so an unsigned build silently loses one-key capture on every single update -- exactly
-the users who upgrade most. Linux needs none of this.
+rebuilds. Linux releases are signed with a real Ed25519 updater key today and auto-update in
+place -- see [Updates](/docs/updates). macOS releases are wired into the same pipeline but gated
+behind an unset repo variable until the Apple Developer ID ($99/yr) is purchased and notarization
+is wired in. This isn't just a "remove a scary dialog" nicety: macOS ties an Accessibility grant
+to a binary's *signature*, so an unsigned build silently loses one-key capture on every single
+update -- exactly the users who upgrade most. Linux needs none of this.

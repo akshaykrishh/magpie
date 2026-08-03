@@ -39,7 +39,7 @@ Usable today, on `main` unless noted:
   pipeline; the app checks for, downloads, and installs updates on its
   own with your explicit confirmation before anything installs. See
   [RELEASING.md](RELEASING.md) for the process and
-  [docs/design.md](docs/design.md) for the signing-key trust boundary.
+  [SECURITY.md](SECURITY.md) for the signing-key trust boundary.
 
 ## Next
 
