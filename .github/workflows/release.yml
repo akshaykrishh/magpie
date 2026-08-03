@@ -23,7 +23,10 @@ jobs:
     steps:
       - name: Resolve the tag
         id: tag
-        run: echo "tag=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: echo "tag=${INPUT_TAG:-$REF_NAME}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -31,33 +34,39 @@ jobs:
           fetch-depth: 0
 
       - name: Check release invariants
-        run: scripts/check-release-invariants.sh "${{ steps.tag.outputs.tag }}"
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: scripts/check-release-invariants.sh "$TAG"
 
       # A tag pushed against a branch that never merged to main (or a stale
       # local branch) must never reach a real release -- this is the guard
       # against cutting a release from code nobody reviewed on the trunk.
       - name: Assert the tag's commit is on main
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           git fetch origin main
           if ! git merge-base --is-ancestor HEAD origin/main; then
-            echo "::error::${{ steps.tag.outputs.tag }}'s commit is not on main -- refusing to release from an unmerged branch."
+            echo "::error::${TAG}'s commit is not on main -- refusing to release from an unmerged branch."
             exit 1
           fi
 
       - name: Compute version, previous tag, macOS gating, and build matrix
         id: compute
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          MACOS_RELEASE_ENABLED: ${{ vars.MACOS_RELEASE_ENABLED }}
         run: |
-          tag="${{ steps.tag.outputs.tag }}"
-          version="${tag#v}"
+          version="${TAG#v}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
           # Most recent *other* tag, by creation date -- empty for the very
           # first release, which the create-release job's changelog-compare
           # line handles explicitly rather than producing a broken link.
-          previous_tag=$(git tag --sort=-creatordate | grep -v "^${tag}$" | head -1 || true)
+          previous_tag=$(git tag --sort=-creatordate | grep -v "^${TAG}$" | head -1 || true)
           echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
 
-          if [ "${{ vars.MACOS_RELEASE_ENABLED }}" = "true" ]; then
+          if [ "$MACOS_RELEASE_ENABLED" = "true" ]; then
             echo "macos_enabled=true" >> "$GITHUB_OUTPUT"
             echo 'matrix=[{"os":"ubuntu-22.04","platform":"linux"},{"os":"macos-latest","platform":"macos"}]' >> "$GITHUB_OUTPUT"
           else
@@ -78,18 +87,20 @@ jobs:
           ref: ${{ needs.guard.outputs.tag }}
 
       - name: Build the release body
+        env:
+          TAG: ${{ needs.guard.outputs.tag }}
+          VERSION: ${{ needs.guard.outputs.version }}
+          PREVIOUS_TAG: ${{ needs.guard.outputs.previous_tag }}
+          MACOS_ENABLED: ${{ needs.guard.outputs.macos_enabled }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          tag="${{ needs.guard.outputs.tag }}"
-          version="${{ needs.guard.outputs.version }}"
-          previous_tag="${{ needs.guard.outputs.previous_tag }}"
-
           {
-            scripts/extract-changelog.sh "$version"
+            scripts/extract-changelog.sh "$VERSION"
             echo
-            if [ -n "$previous_tag" ]; then
-              echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${previous_tag}...${tag}"
+            if [ -n "$PREVIOUS_TAG" ]; then
+              echo "**Full Changelog**: https://github.com/${REPOSITORY}/compare/${PREVIOUS_TAG}...${TAG}"
             fi
-            if [ "${{ needs.guard.outputs.macos_enabled }}" != "true" ]; then
+            if [ "$MACOS_ENABLED" != "true" ]; then
               echo
               echo "_macOS builds aren't attached to this release yet -- code signing isn't set up. Linux only for now._"
             fi
@@ -111,17 +122,17 @@ jobs:
         id: create-or-reuse
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.guard.outputs.tag }}
         run: |
-          tag="${{ needs.guard.outputs.tag }}"
-          existing_json=$(gh release view "$tag" --json databaseId,isDraft 2>/dev/null || true)
+          existing_json=$(gh release view "$TAG" --json databaseId,isDraft 2>/dev/null || true)
 
           if [ -n "$existing_json" ]; then
             is_draft=$(echo "$existing_json" | jq -r .isDraft)
             if [ "$is_draft" != "true" ]; then
-              echo "::error::$tag was already released; re-running won't touch a published release -- cut a new patch version instead."
+              echo "::error::$TAG was already released; re-running won't touch a published release -- cut a new patch version instead."
               exit 1
             fi
-            gh release delete "$tag" --yes
+            gh release delete "$TAG" --yes
           fi
 
           # Runs whether a stale draft was just deleted above or nothing
@@ -129,9 +140,9 @@ jobs:
           # Actions' default bash shell runs with `-e`, so a failing
           # `gh release create` already aborts this step; no manual `|| exit
           # 1` needed.
-          gh release create "$tag" --draft --notes-file /tmp/release-body.md --title "$tag"
+          gh release create "$TAG" --draft --notes-file /tmp/release-body.md --title "$TAG"
 
-          release_id=$(gh release view "$tag" --json databaseId --jq .databaseId)
+          release_id=$(gh release view "$TAG" --json databaseId --jq .databaseId)
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
   build:
@@ -244,7 +255,8 @@ jobs:
       - name: Download exactly what's attached to the draft
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release download "${{ needs.guard.outputs.tag }}" --dir /tmp/release-assets
+          TAG: ${{ needs.guard.outputs.tag }}
+        run: gh release download "$TAG" --dir /tmp/release-assets
 
       - name: Generate SHA256SUMS
         run: |
@@ -254,7 +266,8 @@ jobs:
       - name: Upload SHA256SUMS
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ needs.guard.outputs.tag }}" /tmp/release-assets/SHA256SUMS
+          TAG: ${{ needs.guard.outputs.tag }}
+        run: gh release upload "$TAG" /tmp/release-assets/SHA256SUMS
 
       - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
@@ -269,4 +282,6 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "${{ needs.guard.outputs.tag }}" --repo "${{ github.repository }}" --draft=false
+          TAG: ${{ needs.guard.outputs.tag }}
+          REPOSITORY: ${{ github.repository }}
+        run: gh release edit "$TAG" --repo "$REPOSITORY" --draft=false
