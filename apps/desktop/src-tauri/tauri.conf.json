@@ -1,6 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "magpie",
+  "mainBinaryName": "magpie",
   "identifier": "app.magpie.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
