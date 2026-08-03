@@ -188,7 +188,16 @@ jobs:
           rustup target add x86_64-apple-darwin
           rustup target add aarch64-apple-darwin
 
+      # Without an explicit shared-key, rust-cache's default cache key is
+      # job-id + Cargo.lock hash + rustc version + runner.os -- and
+      # runner.os is just "Linux", identical for this job's ubuntu-22.04
+      # and ci.yml's ubuntu-latest (24.04). Both jobs are also named
+      # "build", so without this key they'd collide and this job would
+      # restore ci.yml's ubuntu-latest-built target/, whose cross-glibc
+      # artifacts silently broke ashpd's compiled rlib (E0463) here.
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: release-${{ matrix.platform }}
 
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
