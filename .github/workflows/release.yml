@@ -133,3 +133,140 @@ jobs:
 
           release_id=$(gh release view "$tag" --json databaseId --jq .databaseId)
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [guard, create-release]
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.guard.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.guard.outputs.tag }}
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libgtk-3-dev
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      # ci.yml's build job never needs this -- it only ever builds for the
+      # runner's native arch to verify the build works, not to produce a
+      # universal binary. A real universal-apple-darwin build needs both
+      # Darwin targets installed regardless of which one the runner's host
+      # arch already has.
+      - name: Add both macOS Rust targets
+        if: matrix.platform == 'macos'
+        run: |
+          rustup target add x86_64-apple-darwin
+          rustup target add aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: apps/desktop/package.json
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          includeUpdaterJson: true
+          args: ${{ matrix.platform == 'macos' && '--target universal-apple-darwin --config src-tauri/tauri.release.conf.json --locked' || '--config src-tauri/tauri.release.conf.json --locked' }}
+
+      # Artifact integrity, not a GUI launch -- see the master plan's
+      # grilling-pass decision on why a real headless launch was rejected
+      # (magpie's tray/hotkey init have zero test coverage and need a real
+      # D-Bus session, not just Xvfb; simulating one would be genuinely new,
+      # untested CI infrastructure). This catches a corrupt/malformed
+      # bundle cheaply, before checksums-and-attest ever sees it.
+      - name: Verify bundle integrity (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          set -e
+          cd target/release/bundle
+          appimage=$(find appimage -name '*.AppImage')
+          "$appimage" --appimage-extract
+          test -x squashfs-root/AppRun
+          rm -rf squashfs-root
+          deb=$(find deb -name '*.deb')
+          dpkg-deb --contents "$deb" | grep -q 'usr/bin/magpie'
+
+      - name: Verify bundle integrity (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          set -e
+          dmg=$(find target/universal-apple-darwin/release/bundle/dmg -name '*.dmg')
+          mount_point=$(hdiutil attach "$dmg" -nobrowse -readonly | tail -1 | awk '{print $NF}')
+          app=$(find "$mount_point" -maxdepth 1 -name '*.app')
+          test -x "$app/Contents/MacOS/magpie"
+          hdiutil detach "$mount_point"
+          # codesign -dv --verify "$app" -- enabled once Phase 3 signing exists.
+
+  checksums-and-attest:
+    needs: [guard, create-release, build]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download exactly what's attached to the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ needs.guard.outputs.tag }}" --dir /tmp/release-assets
+
+      - name: Generate SHA256SUMS
+        run: |
+          cd /tmp/release-assets
+          sha256sum * > SHA256SUMS
+
+      - name: Upload SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ needs.guard.outputs.tag }}" /tmp/release-assets/SHA256SUMS
+
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: "/tmp/release-assets/*"
+
+  publish:
+    needs: [guard, create-release, build, checksums-and-attest]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ needs.guard.outputs.tag }}" --repo "${{ github.repository }}" --draft=false
