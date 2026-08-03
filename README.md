@@ -5,10 +5,11 @@ for people who work across ChatGPT, Claude, Cursor, and agent CLIs. Runs on macO
 Agents can read and write your queue over MCP.
 
 **Status: early development.** The capture core, MCP server, and CLI work end-to-end on macOS.
-On Linux, the full test suite runs and passes in CI on every push, but nobody has yet run the
-actual desktop app on a real Linux machine — that first-hand verification is still outstanding.
-No signed releases yet; CI produces unsigned build artifacts on every push (see Development
-below to build from source in the meantime).
+[Signed Linux releases](https://github.com/akshaykrishh/magpie/releases) are available now
+(`.deb` and `.AppImage`, in-app auto-updating) — macOS releases are pending code signing, see
+below. The full test suite runs and passes in CI on every push, but nobody has yet run the
+actual desktop app on real Linux hardware — that first-hand verification is still outstanding;
+see [SECURITY.md](SECURITY.md) for verifying a download in the meantime.
 
 **Docs: [akshaykrishh.github.io/magpie](https://akshaykrishh.github.io/magpie)** -- installation,
 concepts, the CLI and MCP reference, architecture, and the schema. [docs/design.md](docs/design.md)
@@ -26,8 +27,9 @@ hands can empty.
 ## Roadmap
 
 The capture core, MCP server + CLI, and prompt packs are done and usable today. Screenshots + OCR
-work on macOS; Linux has the code but not yet a first-hand run on real hardware. Packaging ships
-unsigned installers from CI; real code signing is still a manual step.
+work on macOS; Linux has the code but not yet a first-hand run on real hardware. Linux releases
+are signed and auto-update; macOS code signing (needed before a Homebrew cask) is still a manual
+step.
 
 **[ROADMAP.md](ROADMAP.md)** has what's next, in Now/Next/Later form, and what this project is
 deliberately not doing. **[docs/design.md](docs/design.md)** is the architecture and the reasoning
