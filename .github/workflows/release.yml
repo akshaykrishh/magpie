@@ -266,11 +266,15 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      # No actions/checkout in this job -- it only ever touches release
+      # assets, never the source tree -- so gh has no git remote to infer
+      # the repo from and every gh release call here needs --repo explicit.
       - name: Download exactly what's attached to the draft
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.guard.outputs.tag }}
-        run: gh release download "$TAG" --dir /tmp/release-assets
+          REPOSITORY: ${{ github.repository }}
+        run: gh release download "$TAG" --repo "$REPOSITORY" --dir /tmp/release-assets
 
       - name: Generate SHA256SUMS
         run: |
@@ -281,7 +285,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.guard.outputs.tag }}
-        run: gh release upload "$TAG" /tmp/release-assets/SHA256SUMS
+          REPOSITORY: ${{ github.repository }}
+        run: gh release upload "$TAG" /tmp/release-assets/SHA256SUMS --repo "$REPOSITORY"
 
       - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
