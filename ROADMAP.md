@@ -34,6 +34,12 @@ Usable today, on `main` unless noted:
   of a tab bar, hold-to-aim (hold the capture hotkey to redirect a filing
   guess instead of only confirm-or-ignore), and Across (⌘⌥K), the
   cross-project "what needs a look" rollup.
+- **Signed releases and in-app updates** — `v0.1.0` onward ships signed,
+  checksummed, attested Linux `.deb`/`.AppImage` builds via a tag-triggered
+  pipeline; the app checks for, downloads, and installs updates on its
+  own with your explicit confirmation before anything installs. See
+  [RELEASING.md](RELEASING.md) for the process and
+  [docs/design.md](docs/design.md) for the signing-key trust boundary.
 
 ## Next
 
@@ -45,10 +51,12 @@ Usable today, on `main` unless noted:
   done rather than "type-checks" — the redesign's floating panels
   (toast/aim/across) specifically rest on a macOS NSPanel technique whose
   Linux fallback (plain window show/hide) hasn't been checked at all.
-- **Code signing and notarization** — CI ships unsigned artifacts today.
-  Needed before a real v1: unsigned builds revoke macOS Accessibility
-  grants on every update, silently breaking one-key capture for anyone who
-  upgrades.
+- **macOS code signing and notarization** — Linux releases are signed and
+  auto-update today; macOS is gated behind purchasing an Apple Developer
+  ID ($99/yr) and wiring notarization into `release.yml`'s already-built
+  macOS job. Needed before a real v1: unsigned builds revoke macOS
+  Accessibility grants on every update, silently breaking one-key capture
+  for anyone who upgrades.
 - **Agent session follow-ups** — a way for an MCP-connected agent to write
   back open items it noticed but didn't act on (`capture_followup`), folded
   into that session's digest rather than adding rows, surfaced as a count
