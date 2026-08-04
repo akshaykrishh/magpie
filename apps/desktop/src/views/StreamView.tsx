@@ -85,6 +85,11 @@ function rowSignals(trigger: KeyboardRowTrigger | null, captureId: number) {
 
 interface StreamViewProps {
   stream: StreamRow[];
+  // Set when the last refreshStream() call failed -- see App.tsx. Null on
+  // a genuinely empty (successfully-loaded) stream, which is why this is
+  // rendered ahead of the `visibleStream.length === 0` empty state below
+  // rather than folded into it.
+  streamError?: string | null;
   sections: Section[];
   projects: Project[];
   refreshStream: () => void;
@@ -103,6 +108,7 @@ type FilterPill = "none" | "project" | "images";
 
 export function StreamView({
   stream,
+  streamError,
   sections,
   projects,
   refreshStream,
@@ -443,6 +449,27 @@ export function StreamView({
         onKeyDown={streamCursor.onKeyDown}
         className="flex-1 overflow-y-auto focus:outline-none focus-within:ring-1 focus-within:ring-accent-line"
       >
+        {/* A failed refreshStream() used to fail silently (console.error
+            only) -- the row list just stayed empty, which read identically
+            to "you have no captures". This is deliberately ahead of
+            everything else in the stream: a load failure isn't a normal
+            empty state, and every row below is stale until it's fixed. */}
+        <Earned when={!searchResults && !!streamError}>
+          <div className="mb-2 flex items-center gap-3 rounded-md border border-danger bg-danger/10 px-3 py-2.5">
+            <Mono size="sm" tone="danger" weight="bold">
+              COULDN'T LOAD CAPTURES
+            </Mono>
+            <span className="flex-1 text-xs text-fg-muted">{streamError}</span>
+            <button
+              type="button"
+              onClick={refreshStream}
+              className="rounded-sm border border-danger px-2 py-1 text-xs text-danger hover:bg-danger/10"
+            >
+              Retry
+            </button>
+          </div>
+        </Earned>
+
         {/* The permission upgrade offer, first slot in the stream -- ahead
             of Unfiled, since it's about the capture mechanism itself
             rather than anything already captured. Earned at 24
