@@ -16,6 +16,11 @@ import { StreamView } from "./views/StreamView";
 function App() {
   const overlay = useOverlay();
   const [stream, setStream] = useState<StreamRow[]>([]);
+  // Distinguishes "genuinely empty" from "failed to load" -- before this,
+  // a failed listStreamRows() (e.g. a schema mismatch against the local
+  // db) left `stream` at its initial `[]` with the failure visible only in
+  // devtools, which read identically to "you have no captures" in the UI.
+  const [streamError, setStreamError] = useState<string | null>(null);
   const [now, setNow] = useState<Capture[]>([]);
   const [sessions, setSessions] = useState<SessionView[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
@@ -60,7 +65,16 @@ function App() {
   }, []);
 
   const refreshStream = useCallback(() => {
-    api.listStreamRows({ kind: "all" }).then(setStream).catch(console.error);
+    api
+      .listStreamRows({ kind: "all" })
+      .then((rows) => {
+        setStream(rows);
+        setStreamError(null);
+      })
+      .catch((e) => {
+        console.error(e);
+        setStreamError(e instanceof Error ? e.message : String(e));
+      });
   }, []);
 
   const refreshNow = useCallback(() => {
@@ -277,6 +291,7 @@ function App() {
         <section className="flex flex-1 flex-col overflow-hidden">
           <StreamView
             stream={stream}
+            streamError={streamError}
             sections={sections}
             projects={projects}
             refreshStream={refreshStream}

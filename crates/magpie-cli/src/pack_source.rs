@@ -49,8 +49,14 @@ pub fn fetch(source: &str) -> Result<(String, ParsedPack)> {
     }
 
     let url = as_git_url(source);
+    validate_clone_url(&url)?;
     let tmp = tempfile::tempdir().context("failed to create a temp directory for the clone")?;
     let status = Command::new("git")
+        // Defense-in-depth alongside `validate_clone_url`: even if a
+        // future edit loosened that check, git itself refuses any
+        // transport outside this list. `https`/`ssh` are the only two
+        // `validate_clone_url` ever allows through.
+        .env("GIT_ALLOW_PROTOCOL", "https:ssh")
         .args(["clone", "--depth", "1", &url])
         .arg(tmp.path())
         .status()
@@ -107,6 +113,26 @@ fn as_git_url(source: &str) -> String {
         Some(rest) => format!("https://github.com/{rest}.git"),
         None => source.to_string(),
     }
+}
+
+/// `source` is untrusted by design -- `magpie pack add` exists to install
+/// packs other people wrote and shared (`github:someone/agent-prompts`, a
+/// link pasted from a README or chat), and whatever it resolves to gets
+/// passed straight through to `git clone`'s argv. Git treats a clone URL
+/// as a transport dispatch, not merely an endpoint: `ext::<command>` runs
+/// an arbitrary shell command as the "transport" (allowed by git's
+/// default `protocol.ext.allow=user`), and a string starting with `-`
+/// (e.g. `--upload-pack=...`) can be parsed as a clone option instead of
+/// a repository. Requiring an exact `https://`/`git@` prefix closes both
+/// at once -- neither an `ext::` payload nor a leading `-` can ever match.
+fn validate_clone_url(url: &str) -> Result<()> {
+    if url.starts_with("https://") || url.starts_with("git@") {
+        return Ok(());
+    }
+    bail!(
+        "refusing to clone {url:?}: pack sources must be an https:// or git@ URL \
+         (or an existing local path)"
+    );
 }
 
 /// A source is treated as a local path only when it's an existing
@@ -215,6 +241,47 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let err = fetch(dir.path().to_str().unwrap()).unwrap_err();
         assert!(err.to_string().contains("magpie.json"));
+    }
+
+    // Regression test for a real vulnerability: `fetch()` used to pass
+    // `source` through to `git clone`'s argv completely unvalidated once it
+    // failed the "is this an existing local path" check. `ext::<command>`
+    // makes git run an arbitrary shell command as its own "transport" --
+    // `magpie pack add "ext::touch /tmp/pwned"` was full command execution
+    // as whoever ran it, with no confirmation step, for a command whose
+    // entire purpose is installing content someone else wrote and shared.
+    #[test]
+    fn fetch_refuses_an_ext_transport_source() {
+        let err = fetch("ext::sh -c 'touch /tmp/magpie-pack-source-poc'").unwrap_err();
+        assert!(err.to_string().contains("https:// or git@"));
+    }
+
+    #[test]
+    fn fetch_refuses_a_leading_dash_source() {
+        // Would otherwise be parsed by git as an option (e.g.
+        // `--upload-pack=...`) rather than a repository.
+        let err = fetch("--upload-pack=touch /tmp/magpie-pack-source-poc").unwrap_err();
+        assert!(err.to_string().contains("https:// or git@"));
+    }
+
+    #[test]
+    fn fetch_refuses_a_file_scheme_source() {
+        let err = fetch("file:///etc").unwrap_err();
+        assert!(err.to_string().contains("https:// or git@"));
+    }
+
+    #[test]
+    fn validate_clone_url_accepts_https_and_ssh_shorthand() {
+        assert!(validate_clone_url("https://example.com/pack.git").is_ok());
+        assert!(validate_clone_url("git@github.com:someone/agent-prompts.git").is_ok());
+    }
+
+    #[test]
+    fn validate_clone_url_rejects_everything_else() {
+        assert!(validate_clone_url("ext::sh -c 'touch /tmp/pwned'").is_err());
+        assert!(validate_clone_url("file:///etc/passwd").is_err());
+        assert!(validate_clone_url("--upload-pack=x").is_err());
+        assert!(validate_clone_url("ssh://git@example.com/pack.git").is_err());
     }
 
     #[test]
