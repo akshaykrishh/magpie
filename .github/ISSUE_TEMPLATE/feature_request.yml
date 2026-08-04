@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest something magpie doesn't do yet.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [ROADMAP.md](https://github.com/akshaykrishh/magpie/blob/main/ROADMAP.md) first —
+        it lists what's already planned, plus a "Non-goals" section for things that were
+        considered and deliberately left out.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: The workflow or friction this comes from, not just the feature itself.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What would you want to happen?
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+    validations:
+      required: false

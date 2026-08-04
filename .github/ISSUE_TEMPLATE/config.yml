@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/akshaykrishh/magpie/security/advisories/new
+    about: Please don't file security issues publicly — use private reporting, or see SECURITY.md.
+  - name: Documentation
+    url: https://akshaykrishh.github.io/magpie
+    about: Installation, CLI/MCP reference, architecture, and concepts.

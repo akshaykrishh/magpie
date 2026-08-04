@@ -12,4 +12,5 @@ pnpm install
 pnpm tauri dev
 ```
 
-Push access is held by the maintainer alone; open a PR and it'll be reviewed.
+Push access is held by the maintainer alone; open a PR and it'll be reviewed. This project
+follows a [Code of Conduct](CODE_OF_CONDUCT.md).

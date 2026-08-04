@@ -175,7 +175,8 @@ deliberately not doing. See **[CHANGELOG.md](CHANGELOG.md)** for release history
 ## Contributing
 
 Push access is held by the maintainer alone; open a PR and it'll be reviewed. See
-**[CONTRIBUTING.md](CONTRIBUTING.md)** for dev setup and what CI checks before a PR.
+**[CONTRIBUTING.md](CONTRIBUTING.md)** for dev setup and what CI checks before a PR. This project
+follows a **[Code of Conduct](CODE_OF_CONDUCT.md)**.
 
 ## Security
 
