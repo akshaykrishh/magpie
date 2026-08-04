@@ -16,6 +16,41 @@ version.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-04
+
+### Security
+
+- Fixed a command-injection vulnerability in `magpie pack add <source>`: an untrusted source
+  string was passed straight into `git clone`'s argv, and git's `ext::<command>` transport let a
+  crafted source (e.g. `ext::sh -c '...'`) run arbitrary shell commands — full RCE for a command
+  whose entire purpose is installing packs someone else wrote and shared. `pack_source.rs` now
+  requires an exact `https://`/`git@` URL before anything reaches `git clone`, with
+  `GIT_ALLOW_PROTOCOL` as a second layer; 5 regression tests cover the exact payloads.
+- Set a real Content-Security-Policy on the desktop app's webview (was `csp: null`). Not
+  currently exploitable on its own — there's no script-injection path today — but closes the gap
+  for the moment one gets introduced.
+- Patched 6 Dependabot advisories in the docs site's build tooling (`postcss`, `sharp`,
+  `fast-uri`) via `pnpm-workspace.yaml` overrides. Build-time-only; never reached the shipped
+  desktop app.
+
+### Fixed
+
+- A failed stream load (`refreshStream()`) used to fail silently to the console — the UI looked
+  identical to "you have no captures." Now shows a visible error banner with a Retry button.
+
+### Known limitations
+
+- **Linux is still not hand-verified on real hardware.** Carried over from `v0.1.0`, still true:
+  the full test suite passes in CI on every push, but nobody has run the actual desktop app
+  (tray icon, global hotkey, screenshot capture, in-app update) on a real Linux machine. See
+  `RELEASING.md`'s manual hardware check — outstanding, not a checklist item skipped for a good
+  reason.
+- macOS builds are still unsigned and unpublished — code signing isn't wired up yet (see
+  `ROADMAP.md`). Linux-only release.
+- The `glib` dependency (via the Linux tray/menu chain: `tray-icon → libappindicator → gtk →
+  glib`) has an open, medium-severity Dependabot advisory with no compatible patched version
+  available without a major gtk-rs bump — tracked in #15, not fixed here.
+
 ## [0.1.0] - 2026-08-03
 
 ### Added
