@@ -871,7 +871,7 @@ dependencies = [
 
 [[package]]
 name = "desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "libc",
@@ -2337,7 +2337,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "magpie-capture"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arboard",
  "ashpd",
@@ -2359,7 +2359,7 @@ dependencies = [
 
 [[package]]
 name = "magpie-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2374,7 +2374,7 @@ dependencies = [
 
 [[package]]
 name = "magpie-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dirs",
  "rusqlite",
@@ -2388,7 +2388,7 @@ dependencies = [
 
 [[package]]
 name = "magpie-mcp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "magpie-core",
