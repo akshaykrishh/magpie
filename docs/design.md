@@ -1,7 +1,6 @@
 # Magpie — an open-source capture tool for AI-assisted work
 
-**License:** GPL-3.0 · **Repo:** personal GitHub account · **Platforms:** macOS + Linux
-*Name is a placeholder — rename before the repo goes public if you find better.*
+**License:** GPL-3.0 · **Repo:** [github.com/akshaykrishh/magpie](https://github.com/akshaykrishh/magpie) · **Platforms:** macOS + Linux
 
 ## Context
 

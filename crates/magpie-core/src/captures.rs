@@ -99,9 +99,7 @@ impl Store {
     /// The text to show/copy for a capture: its body, or (for a screenshot,
     /// whose body is always empty -- see capture_flow.rs's
     /// on_screenshot_hotkey) its OCR text, or an honest placeholder if OCR
-    /// hasn't finished yet. Never a silent blank line -- see
-    /// docs/superpowers/specs/2026-07-31-capture-list-v2-design.md's
-    /// "Copy / Copy as List".
+    /// hasn't finished yet. Never a silent blank line.
     pub fn capture_display_text(&self, id: i64) -> Result<String> {
         let capture = self.get_capture(id)?;
         if !capture.body.is_empty() {
@@ -397,8 +395,7 @@ impl Store {
 
     /// Cascades to any capture this one absorbed via merge (`merged_into`
     /// pointing at it) -- otherwise Undo would restore a capture whose
-    /// merge history silently vanished into orphaned, invisible rows. See
-    /// docs/superpowers/specs/2026-07-31-capture-list-v2-design.md.
+    /// merge history silently vanished into orphaned, invisible rows.
     pub fn soft_delete_capture(&self, id: i64) -> Result<Capture> {
         self.with_conn(|conn| {
             let now = now_iso();
@@ -491,9 +488,7 @@ pub(crate) fn get_capture_tx(conn: &rusqlite::Connection, id: i64) -> Result<Cap
 /// on a soft-deleted capture -- or one soft-deleted concurrently between the
 /// mutating UPDATE and the refetch -- falls through to the same
 /// `Error::CaptureNotFound` a genuinely-missing row already produces,
-/// instead of silently succeeding with a no-op UPDATE. See
-/// docs/superpowers/specs/2026-07-31-capture-list-v2-design.md's "Error
-/// handling" section.
+/// instead of silently succeeding with a no-op UPDATE.
 ///
 /// Do NOT use this for `get_capture`, `restore_capture`, or anywhere else a
 /// caller legitimately needs to see a soft-deleted row's current state.

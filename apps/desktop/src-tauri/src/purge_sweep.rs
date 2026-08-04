@@ -4,8 +4,7 @@
 // run on a recurring timer too: a 30-day retention window depends on real
 // wall-clock time passing, and this is a tray app that can plausibly stay
 // open for weeks without a restart -- startup-only would mean purge never
-// fires for a long-running session. See
-// docs/superpowers/specs/2026-07-31-capture-list-v2-design.md "Deletion".
+// fires for a long-running session.
 
 use magpie_core::Store;
 

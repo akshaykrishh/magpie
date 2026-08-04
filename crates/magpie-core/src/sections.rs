@@ -156,8 +156,7 @@ impl Store {
     }
 
     /// The single entry point the desktop app's purge sweep calls -- see
-    /// docs/superpowers/specs/2026-07-31-capture-list-v2-design.md's
-    /// "Deletion" section for why this runs both at startup and on a
+    /// `purge_sweep.rs` for why this runs both at startup and on a
     /// recurring timer, unlike the dead-pid lease sweep.
     pub fn purge_expired(&self, days: i64) -> Result<(usize, usize, usize)> {
         let cutoff = crate::db::purge_cutoff(days);

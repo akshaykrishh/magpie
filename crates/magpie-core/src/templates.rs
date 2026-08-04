@@ -175,9 +175,7 @@ impl Store {
             // concurrently between the UPDATE above and this refetch) must
             // fall through to TemplateNotFound rather than Ok(template with
             // an unchanged section_id) -- same bug class as captures.rs's
-            // mutators, fixed the same way. See
-            // docs/superpowers/specs/2026-07-31-capture-list-v2-design.md's
-            // "Error handling" section.
+            // mutators, fixed the same way.
             get_active_template_tx(conn, id)
         })
     }

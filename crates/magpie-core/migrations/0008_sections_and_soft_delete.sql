@@ -1,6 +1,5 @@
 -- Sections: a lightweight, global, ordered, single-membership grouping for
 -- captures and templates -- distinct from tags (many-to-many, unordered).
--- See docs/superpowers/specs/2026-07-31-capture-list-v2-design.md.
 CREATE TABLE sections (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,

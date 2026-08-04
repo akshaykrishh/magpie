@@ -54,8 +54,7 @@ export function TemplatesSheet({ onInstantiated, onShowUndo }: TemplatesSheetPro
     api.listProjects().then(setProjects).catch(console.error);
     refreshSections();
 
-    // Cross-window sync: sections are global (see docs/superpowers/specs/
-    // 2026-07-31-capture-list-v2-design.md), and both the dock and this
+    // Cross-window sync: sections are global, and both the dock and this
     // window's own stream/Now views can rename/reorder/delete one via their
     // own SectionHeader. Must also refetch templates, not just sections --
     // a section delete clears its members' section_id server-side, but a
@@ -450,11 +449,9 @@ function TemplateCard({
           ))}
         </select>
         {/* "Move to Section" affordance -- functional, not as elaborate as
-            CaptureRow's full context menu (see docs/superpowers/specs/
-            2026-07-31-capture-list-v2-design.md's "Context menu"). A plain
-            select is enough here since a template only ever needs to change
-            its single section membership, not the richer action set
-            captures get. */}
+            CaptureRow's full context menu. A plain select is enough here
+            since a template only ever needs to change its single section
+            membership, not the richer action set captures get. */}
         {sections.length > 0 && (
           <select
             value={template.section_id ?? ""}

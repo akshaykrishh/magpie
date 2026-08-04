@@ -104,8 +104,7 @@ impl Store {
 
     /// Projects ordered by most-recently-touched first (via
     /// `touch_project_active_tx`), untouched projects last. This is the
-    /// ranking the desktop app's capture-filing guess uses -- see
-    /// docs/superpowers/plans/2026-07-31-confidence-aware-capture-filing.md.
+    /// ranking the desktop app's capture-filing guess uses.
     pub fn list_projects_by_recency(&self, limit: i64) -> Result<Vec<Project>> {
         self.with_conn(|conn| {
             let sql = format!(

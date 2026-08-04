@@ -20,3 +20,7 @@ apps/desktop/src-tauri/gen/
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+# Local agent tooling -- session-local planning/config, not project docs
+.claude/
+docs/superpowers/

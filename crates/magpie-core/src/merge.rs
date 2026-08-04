@@ -29,9 +29,7 @@ impl Store {
             // deleted between selection and this call, e.g. from another
             // window) must fail with the same CaptureNotFound a genuinely
             // missing id would, not silently absorb a deleted row's body
-            // into the new merged capture. See
-            // docs/superpowers/specs/2026-07-31-capture-list-v2-design.md's
-            // "Error handling" section.
+            // into the new merged capture.
             let mut sources = Vec::with_capacity(ids.len());
             for &id in ids {
                 sources.push(get_active_capture_tx(&tx, id)?);
