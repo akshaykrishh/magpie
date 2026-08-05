@@ -10,11 +10,13 @@ import { useGlobalKeys } from "./lib/useGlobalKeys";
 import type { Capture, Project, Section, SessionView, StreamRow } from "./lib/types";
 import { OverlayHost } from "./overlays/OverlayHost";
 import { useOverlay } from "./overlays/useOverlay";
+import { useProjectSignal } from "./state/useProjectSignal";
 import { NowColumn } from "./views/NowColumn";
 import { StreamView } from "./views/StreamView";
 
 function App() {
   const overlay = useOverlay();
+  const projectSignal = useProjectSignal();
   const [stream, setStream] = useState<StreamRow[]>([]);
   // Distinguishes "genuinely empty" from "failed to load" -- before this,
   // a failed listStreamRows() (e.g. a schema mismatch against the local
@@ -78,8 +80,8 @@ function App() {
   }, []);
 
   const refreshNow = useCallback(() => {
-    api.listNow(null).then(setNow).catch(console.error);
-  }, []);
+    api.listNow(projectSignal.projectId).then(setNow).catch(console.error);
+  }, [projectSignal.projectId]);
 
   const refreshSessions = useCallback(() => {
     api.listSessionsView().then(setSessions).catch(console.error);

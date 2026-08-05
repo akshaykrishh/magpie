@@ -23,8 +23,8 @@ function DockApp() {
   const projectSignal = useProjectSignal();
 
   const refreshNow = useCallback(() => {
-    api.listNow(null).then(setNow).catch(console.error);
-  }, []);
+    api.listNow(projectSignal.projectId).then(setNow).catch(console.error);
+  }, [projectSignal.projectId]);
 
   const refreshSections = useCallback(() => {
     api.listSections().then(setSections).catch(console.error);
@@ -139,10 +139,13 @@ function DockApp() {
       ? overview.find((o) => o.project_id === projectSignal.projectId)
       : undefined;
 
-  // Other real projects with queued work -- context the dock's flat,
-  // unscoped Now list can't otherwise show. Earned: absent when there's
-  // nothing to report, not shown as an empty footer.
-  const otherDepths = overview.filter((o) => o.project_id !== null && o.now_count > 0);
+  // Other real projects with queued work -- the focused project's own
+  // depth is already the header chip + main list above, so it's excluded
+  // here to avoid showing the same count twice. Earned: absent when
+  // there's nothing to report, not shown as an empty footer.
+  const otherDepths = overview.filter(
+    (o) => o.project_id !== null && o.project_id !== projectSignal.projectId && o.now_count > 0,
+  );
 
   const liveSessionCount = sessions.filter((s) => s.ended_at === null).length;
 
