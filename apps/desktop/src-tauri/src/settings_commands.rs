@@ -158,6 +158,7 @@ const SETTING_KEYS: &[&str] = &[
     "permission_offer_dismissed",
     "onboarding_complete",
     "pinned_project_id",
+    "dock_tab",
     "update_auto_check",
     "update_skipped_version",
 ];
