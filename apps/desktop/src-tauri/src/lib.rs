@@ -131,6 +131,7 @@ pub fn run() {
             commands::list_stream_rows,
             commands::list_now,
             commands::add_typed_capture,
+            commands::add_capture,
             commands::promote_capture,
             commands::demote_capture,
             commands::update_capture_body,

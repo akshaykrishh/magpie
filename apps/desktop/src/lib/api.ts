@@ -30,6 +30,7 @@ export const api = {
     invoke<Capture[]>("list_now", { projectId }),
 
   addTypedCapture: (body: string) => invoke<Capture>("add_typed_capture", { body }),
+  addCapture: (body: string) => invoke<Capture>("add_capture", { body }),
 
   promoteCapture: (id: number) => invoke<Capture>("promote_capture", { id }),
   demoteCapture: (id: number) => invoke<Capture>("demote_capture", { id }),

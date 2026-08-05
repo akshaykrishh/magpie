@@ -84,6 +84,17 @@ pub fn add_typed_capture(state: State<AppState>, body: String) -> CmdResult<Capt
     map_err(state.store.promote(capture.id))
 }
 
+/// Like `add_typed_capture`, but doesn't promote -- for the Dock's
+/// Captures tab, where typing something down is meant to land as a plain
+/// capture (visible in that tab's own list), not silently jump into a
+/// Now queue the person may not be using at all. See the Dock redesign
+/// spec's Captures tab section for why these two need different
+/// commands rather than one with a flag.
+#[tauri::command]
+pub fn add_capture(state: State<AppState>, body: String) -> CmdResult<Capture> {
+    map_err(state.store.capture(&body, None))
+}
+
 #[tauri::command]
 pub fn promote_capture(state: State<AppState>, id: i64) -> CmdResult<Capture> {
     map_err(state.store.promote(id))
