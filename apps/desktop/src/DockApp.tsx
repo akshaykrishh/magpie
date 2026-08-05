@@ -1,7 +1,7 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
 import { CapacityDots, Chip, Earned, Mono } from "./components/ui";
-import { DockNowView } from "./dock/DockNowView";
+import { DockCapturesView } from "./dock/DockCapturesView";
 import { api } from "./lib/api";
 import { NOW_CHANGED_EVENT, SECTIONS_CHANGED_EVENT } from "./lib/events";
 import type { Capture, ProjectOverview, Section, Session } from "./lib/types";
@@ -148,6 +148,24 @@ function DockApp() {
 
   const liveSessionCount = sessions.filter((s) => s.ended_at === null).length;
 
+  // Temporary (Task 4 of the dock-redesign plan): with `<DockCapturesView />`
+  // standing in for `<DockNowView ... />` below for this task's own
+  // verification, `sections` and every Now-specific handler it used to feed
+  // go momentarily unread -- this repo builds with `noUnusedLocals: true`
+  // (apps/desktop/tsconfig.json), which would otherwise fail `tsc --noEmit`
+  // on exactly the state/handlers Task 6's real tab switcher reattaches to a
+  // restored `<DockNowView ... />` call. Referencing them here is a no-op at
+  // runtime; delete this block in Task 6 once that call comes back.
+  void sections;
+  void handleAddPrompt;
+  void handleReorder;
+  void handleDone;
+  void handleDemote;
+  void handleRevokeLease;
+  void handleRenameSection;
+  void handleDeleteSection;
+  void handleReorderSection;
+
   return (
     <main className="flex h-screen flex-col gap-2 overflow-hidden bg-white/95 p-2 dark:bg-neutral-950/95">
       <div className="flex items-center gap-1.5 px-0.5">
@@ -173,19 +191,7 @@ function DockApp() {
           </Mono>
         </Earned>
       </div>
-      <DockNowView
-        now={now}
-        sections={sections}
-        sessions={sessions}
-        onAddPrompt={handleAddPrompt}
-        onReorder={handleReorder}
-        onDone={handleDone}
-        onDemote={handleDemote}
-        onRevokeLease={handleRevokeLease}
-        onRenameSection={handleRenameSection}
-        onDeleteSection={handleDeleteSection}
-        onReorderSection={handleReorderSection}
-      />
+      <DockCapturesView />
       <Earned when={otherDepths.length > 0}>
         <div className="flex flex-wrap items-center gap-1.5 border-t border-hairline px-0.5 pt-1.5">
           {otherDepths.map((o) => (
