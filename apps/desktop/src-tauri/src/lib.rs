@@ -253,6 +253,40 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
+            // Accessory apps get no default menu bar from Cocoa -- without
+            // one, nothing binds Cmd+Q/Cmd+W, and the system menu bar's
+            // app-name slot (top left) never picks up "magpie" either,
+            // since that slot is populated from the first menu's presence,
+            // not just the running process. Deliberately minimal: one
+            // app-identity submenu (Hide/Close/Quit), not a full
+            // File/Edit/View/Window/Help suite -- that would fight this
+            // app's hotkey-first, background-utility identity. Standard
+            // edit shortcuts (copy/paste/select all) in text fields
+            // already work without a menu; the webview's own responder
+            // chain handles those regardless. Close Window's accelerator
+            // routes through the same `WindowEvent::CloseRequested` path
+            // as clicking a window's close button, so it already hides
+            // rather than destroys for main/dock/settings (see
+            // `hide_instead_of_close` below) with no extra wiring needed.
+            #[cfg(target_os = "macos")]
+            {
+                let pkg_name = app.package_info().name.clone();
+                let app_menu = tauri::menu::Submenu::with_items(
+                    app,
+                    &pkg_name,
+                    true,
+                    &[
+                        &tauri::menu::PredefinedMenuItem::hide(app, None)?,
+                        &tauri::menu::PredefinedMenuItem::hide_others(app, None)?,
+                        &tauri::menu::PredefinedMenuItem::separator(app)?,
+                        &tauri::menu::PredefinedMenuItem::close_window(app, None)?,
+                        &tauri::menu::PredefinedMenuItem::separator(app)?,
+                        &tauri::menu::PredefinedMenuItem::quit(app, None)?,
+                    ],
+                )?;
+                app.set_menu(tauri::menu::Menu::with_items(app, &[&app_menu])?)?;
+            }
+
             toast::init_toast_panel(app.handle());
             aim::init_aim_panel(app.handle());
             across::init_across_panel(app.handle());
