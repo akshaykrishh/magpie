@@ -1,8 +1,7 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
-import { AddPromptInput } from "./components/AddPromptInput";
-import { NowList } from "./components/NowList";
 import { CapacityDots, Chip, Earned, Mono } from "./components/ui";
+import { DockNowView } from "./dock/DockNowView";
 import { api } from "./lib/api";
 import { NOW_CHANGED_EVENT, SECTIONS_CHANGED_EVENT } from "./lib/events";
 import type { Capture, ProjectOverview, Section, Session } from "./lib/types";
@@ -174,21 +173,19 @@ function DockApp() {
           </Mono>
         </Earned>
       </div>
-      <AddPromptInput onAdd={handleAddPrompt} />
-      <div className="flex-1 overflow-y-auto">
-        <NowList
-          items={now}
-          onReorder={handleReorder}
-          onDone={handleDone}
-          onDemote={handleDemote}
-          sections={sections}
-          onRenameSection={handleRenameSection}
-          onDeleteSection={handleDeleteSection}
-          onReorderSection={handleReorderSection}
-          sessions={sessions}
-          onRevokeLease={handleRevokeLease}
-        />
-      </div>
+      <DockNowView
+        now={now}
+        sections={sections}
+        sessions={sessions}
+        onAddPrompt={handleAddPrompt}
+        onReorder={handleReorder}
+        onDone={handleDone}
+        onDemote={handleDemote}
+        onRevokeLease={handleRevokeLease}
+        onRenameSection={handleRenameSection}
+        onDeleteSection={handleDeleteSection}
+        onReorderSection={handleReorderSection}
+      />
       <Earned when={otherDepths.length > 0}>
         <div className="flex flex-wrap items-center gap-1.5 border-t border-hairline px-0.5 pt-1.5">
           {otherDepths.map((o) => (
