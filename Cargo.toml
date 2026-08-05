@@ -22,3 +22,17 @@ tokio = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+
+# muda (pulled in transitively via tauri's tray/menu support) has a
+# use-after-free that crashes the whole process if the tray menu is
+# rebuilt while its dropdown is open on screen -- exactly what
+# `tray::rebuild_tray_menu` does on every capture/now-changed event plus
+# a 15s poll. Fixed upstream in tauri-apps/muda#361, merged to `dev` on
+# 2026-07-30, but not yet in a published release (still 0.19.3 on
+# crates.io as of this writing). Pinned to the exact fix commit -- not a
+# floating branch -- so this is reproducible until a real release ships.
+# Remove this patch once `cargo update -p muda` would pull a version
+# newer than 0.19.3 from crates.io on its own.
+# https://github.com/tauri-apps/muda/issues/328
+[patch.crates-io]
+muda = { git = "https://github.com/tauri-apps/muda", rev = "a1550bd9698208b6698cd8fb27c5169808ed892f" }
