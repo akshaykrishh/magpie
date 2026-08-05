@@ -1,7 +1,7 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
 import { CapacityDots, Chip, Earned, Mono } from "./components/ui";
-import { DockCapturesView } from "./dock/DockCapturesView";
+import { DockActivityView } from "./dock/DockActivityView";
 import { api } from "./lib/api";
 import { NOW_CHANGED_EVENT, SECTIONS_CHANGED_EVENT } from "./lib/events";
 import type { Capture, ProjectOverview, Section, Session } from "./lib/types";
@@ -148,10 +148,11 @@ function DockApp() {
 
   const liveSessionCount = sessions.filter((s) => s.ended_at === null).length;
 
-  // Temporary (Task 4 of the dock-redesign plan): with `<DockCapturesView />`
-  // standing in for `<DockNowView ... />` below for this task's own
-  // verification, `sections` and every Now-specific handler it used to feed
-  // go momentarily unread -- this repo builds with `noUnusedLocals: true`
+  // Temporary (now Task 5 of the dock-redesign plan): with `<DockActivityView
+  // ... />` standing in for `<DockNowView ... />` below for this task's own
+  // verification (Task 4 used `<DockCapturesView />` for the same purpose),
+  // `sections` and every Now-specific handler it used to feed go momentarily
+  // unread -- this repo builds with `noUnusedLocals: true`
   // (apps/desktop/tsconfig.json), which would otherwise fail `tsc --noEmit`
   // on exactly the state/handlers Task 6's real tab switcher reattaches to a
   // restored `<DockNowView ... />` call. Referencing them here is a no-op at
@@ -191,7 +192,7 @@ function DockApp() {
           </Mono>
         </Earned>
       </div>
-      <DockCapturesView />
+      <DockActivityView projectId={projectSignal.projectId} sessions={sessions} />
       <Earned when={otherDepths.length > 0}>
         <div className="flex flex-wrap items-center gap-1.5 border-t border-hairline px-0.5 pt-1.5">
           {otherDepths.map((o) => (
