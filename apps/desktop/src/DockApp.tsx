@@ -2,6 +2,9 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
 import { CapacityDots, Chip, Earned, Mono } from "./components/ui";
 import { DockActivityView } from "./dock/DockActivityView";
+import { DockCapturesView } from "./dock/DockCapturesView";
+import { DockNowView } from "./dock/DockNowView";
+import { DockTabs, type DockTab } from "./dock/DockTabs";
 import { api } from "./lib/api";
 import { NOW_CHANGED_EVENT, SECTIONS_CHANGED_EVENT } from "./lib/events";
 import type { Capture, ProjectOverview, Section, Session } from "./lib/types";
@@ -19,7 +22,22 @@ function DockApp() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [nowCap, setNowCap] = useState(DEFAULT_NOW_CAP);
   const [overview, setOverview] = useState<ProjectOverview[]>([]);
+  const [tab, setTab] = useState<DockTab>("now");
   const projectSignal = useProjectSignal();
+
+  useEffect(() => {
+    api
+      .getSetting("dock_tab")
+      .then((v) => {
+        if (v === "now" || v === "captures" || v === "activity") setTab(v);
+      })
+      .catch(console.error);
+  }, []);
+
+  function handleTabChange(next: DockTab) {
+    setTab(next);
+    api.setSetting("dock_tab", next).catch(console.error);
+  }
 
   const refreshNow = useCallback(() => {
     api.listNow(projectSignal.projectId).then(setNow).catch(console.error);
@@ -148,25 +166,6 @@ function DockApp() {
 
   const liveSessionCount = sessions.filter((s) => s.ended_at === null).length;
 
-  // Temporary (now Task 5 of the dock-redesign plan): with `<DockActivityView
-  // ... />` standing in for `<DockNowView ... />` below for this task's own
-  // verification (Task 4 used `<DockCapturesView />` for the same purpose),
-  // `sections` and every Now-specific handler it used to feed go momentarily
-  // unread -- this repo builds with `noUnusedLocals: true`
-  // (apps/desktop/tsconfig.json), which would otherwise fail `tsc --noEmit`
-  // on exactly the state/handlers Task 6's real tab switcher reattaches to a
-  // restored `<DockNowView ... />` call. Referencing them here is a no-op at
-  // runtime; delete this block in Task 6 once that call comes back.
-  void sections;
-  void handleAddPrompt;
-  void handleReorder;
-  void handleDone;
-  void handleDemote;
-  void handleRevokeLease;
-  void handleRenameSection;
-  void handleDeleteSection;
-  void handleReorderSection;
-
   return (
     <main className="flex h-screen flex-col gap-2 overflow-hidden bg-white/95 p-2 dark:bg-neutral-950/95">
       <div className="flex items-center gap-1.5 px-0.5">
@@ -192,7 +191,26 @@ function DockApp() {
           </Mono>
         </Earned>
       </div>
-      <DockActivityView projectId={projectSignal.projectId} sessions={sessions} />
+      <DockTabs active={tab} onChange={handleTabChange} />
+      {tab === "now" && (
+        <DockNowView
+          now={now}
+          sections={sections}
+          sessions={sessions}
+          onAddPrompt={handleAddPrompt}
+          onReorder={handleReorder}
+          onDone={handleDone}
+          onDemote={handleDemote}
+          onRevokeLease={handleRevokeLease}
+          onRenameSection={handleRenameSection}
+          onDeleteSection={handleDeleteSection}
+          onReorderSection={handleReorderSection}
+        />
+      )}
+      {tab === "captures" && <DockCapturesView />}
+      {tab === "activity" && (
+        <DockActivityView projectId={projectSignal.projectId} sessions={sessions} />
+      )}
       <Earned when={otherDepths.length > 0}>
         <div className="flex flex-wrap items-center gap-1.5 border-t border-hairline px-0.5 pt-1.5">
           {otherDepths.map((o) => (

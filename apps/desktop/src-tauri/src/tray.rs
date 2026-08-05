@@ -280,7 +280,7 @@ fn rebuild_tray_menu_for(app: &AppHandle, tray: &TrayIcon) {
     }
 
     let show = MenuItem::with_id(app, "show", "Show magpie", true, None::<&str>);
-    let toggle_dock = MenuItem::with_id(app, "toggle_dock", "Toggle Now dock", true, None::<&str>);
+    let toggle_dock = MenuItem::with_id(app, "toggle_dock", "Toggle Dock", true, None::<&str>);
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>);
     let quiet_label = if is_quiet_now(store) {
         "Stop being quiet"
