@@ -82,6 +82,11 @@ export function FirstRunView({ onDone }: FirstRunViewProps) {
         confirms it.
       </p>
 
+      <p className="max-w-md text-body-sm text-fg-faint">
+        This window steps aside once you're back at work — the tray icon always brings it back,
+        and the hotkeys above work from anywhere.
+      </p>
+
       <button
         type="button"
         onClick={handleDone}
