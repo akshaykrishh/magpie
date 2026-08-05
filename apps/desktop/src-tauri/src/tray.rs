@@ -4,7 +4,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Listener, Manager,
+    AppHandle, Emitter, Listener, Manager,
 };
 
 use crate::capture_flow::{is_quiet_now, QUIET_UNTIL_KEY};
@@ -366,6 +366,12 @@ fn toggle_dock_window(app: &AppHandle) {
     } else {
         let _ = window.show();
         let _ = window.set_focus();
+        // Cross-project peeking (DockApp.tsx) is meant to be transient,
+        // not a state you can leave set and forget -- reset it back to
+        // following global focus every time the Dock is reopened after
+        // being hidden, rather than persisting a peeked project silently
+        // across sessions.
+        let _ = app.emit("dock:shown", ());
     }
 }
 

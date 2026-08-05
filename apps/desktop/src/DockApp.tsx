@@ -6,7 +6,7 @@ import { DockCapturesView } from "./dock/DockCapturesView";
 import { DockNowView } from "./dock/DockNowView";
 import { DockTabs, type DockTab } from "./dock/DockTabs";
 import { api } from "./lib/api";
-import { NOW_CHANGED_EVENT, SECTIONS_CHANGED_EVENT } from "./lib/events";
+import { DOCK_SHOWN_EVENT, NOW_CHANGED_EVENT, SECTIONS_CHANGED_EVENT } from "./lib/events";
 import type { Capture, ProjectOverview, Section, Session } from "./lib/types";
 import { useProjectSignal } from "./state/useProjectSignal";
 
@@ -24,6 +24,8 @@ function DockApp() {
   const [overview, setOverview] = useState<ProjectOverview[]>([]);
   const [tab, setTab] = useState<DockTab>("now");
   const projectSignal = useProjectSignal();
+  const [peekedProjectId, setPeekedProjectId] = useState<number | null>(null);
+  const effectiveProjectId = peekedProjectId ?? projectSignal.projectId;
 
   useEffect(() => {
     api
@@ -40,8 +42,8 @@ function DockApp() {
   }
 
   const refreshNow = useCallback(() => {
-    api.listNow(projectSignal.projectId).then(setNow).catch(console.error);
-  }, [projectSignal.projectId]);
+    api.listNow(effectiveProjectId).then(setNow).catch(console.error);
+  }, [effectiveProjectId]);
 
   const refreshSections = useCallback(() => {
     api.listSections().then(setSections).catch(console.error);
@@ -81,10 +83,12 @@ function DockApp() {
       refreshOverview();
     });
     const unlistenSections = listen(SECTIONS_CHANGED_EVENT, refreshSections);
+    const unlistenDockShown = listen(DOCK_SHOWN_EVENT, () => setPeekedProjectId(null));
     return () => {
       clearInterval(poll);
       unlisten.then((f) => f());
       unlistenSections.then((f) => f());
+      unlistenDockShown.then((f) => f());
     };
   }, [refreshNow, refreshSections, refreshSessions, refreshOverview]);
 
@@ -152,8 +156,8 @@ function DockApp() {
   // has a live session". Looked up against `overview` (not `listProjects`)
   // since that's what already carries `branch` alongside the name.
   const focused =
-    projectSignal.projectId != null
-      ? overview.find((o) => o.project_id === projectSignal.projectId)
+    effectiveProjectId != null
+      ? overview.find((o) => o.project_id === effectiveProjectId)
       : undefined;
 
   // Other real projects with queued work -- the focused project's own
@@ -161,7 +165,7 @@ function DockApp() {
   // here to avoid showing the same count twice. Earned: absent when
   // there's nothing to report, not shown as an empty footer.
   const otherDepths = overview.filter(
-    (o) => o.project_id !== null && o.project_id !== projectSignal.projectId && o.now_count > 0,
+    (o) => o.project_id !== null && o.project_id !== effectiveProjectId && o.now_count > 0,
   );
 
   const liveSessionCount = sessions.filter((s) => s.ended_at === null).length;
@@ -209,14 +213,19 @@ function DockApp() {
       )}
       {tab === "captures" && <DockCapturesView />}
       {tab === "activity" && (
-        <DockActivityView projectId={projectSignal.projectId} sessions={sessions} />
+        <DockActivityView projectId={effectiveProjectId} sessions={sessions} />
       )}
       <Earned when={otherDepths.length > 0}>
         <div className="flex flex-wrap items-center gap-1.5 border-t border-hairline px-0.5 pt-1.5">
           {otherDepths.map((o) => (
-            <Mono key={o.project_id} size="xs" tone="faint">
+            <Chip
+              key={o.project_id}
+              variant={o.needs_review_count > 0 ? "accent" : "neutral"}
+              onClick={() => setPeekedProjectId(o.project_id)}
+            >
               {o.project_name.toUpperCase()} {o.now_count}
-            </Mono>
+              {o.needs_review_count > 0 ? ` · ${o.needs_review_count} NEEDS REVIEW` : ""}
+            </Chip>
           ))}
         </div>
       </Earned>

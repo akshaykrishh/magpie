@@ -45,6 +45,15 @@ export function DockActivityView({ projectId, sessions }: DockActivityViewProps)
   }, [refresh]);
 
   const sessionProjectIds = new Map(sessions.map((s) => [s.id, s.project_id]));
+  // When `projectId` is null (nothing pinned/derived, and -- as of Task 7
+  // -- nothing peeked either), this matches sessions whose own
+  // `project_id` is null too, rather than showing nothing. That's a
+  // conscious choice, not an oversight (flagged during Task 5's review,
+  // confirmed still correct while wiring `effectiveProjectId` in Task 7):
+  // `list_now`'s own SQL (`WHERE project_id IS ?1`, captures.rs) has the
+  // same null-matches-null semantics, so the Now and Activity tabs stay
+  // consistent with each other in the unfocused state -- both treat
+  // `project_id: null` as the "Inbox" scope, not as "everything".
   const scoped = entries
     .filter((e) => e.session_id !== null && sessionProjectIds.get(e.session_id) === projectId)
     .slice(0, RECENT_LIMIT);

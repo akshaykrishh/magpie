@@ -13,6 +13,12 @@ export const NOW_CHANGED_EVENT = "now:changed";
 // refetch.
 export const SECTIONS_CHANGED_EVENT = "sections:changed";
 
+// Fired by tray::toggle_dock_window whenever the Dock transitions from
+// hidden to visible -- DockApp.tsx listens for this to reset cross-project
+// "peeking" (see peekedProjectId) back to following global focus, rather
+// than leaving a peeked project silently set across a hide/show cycle.
+export const DOCK_SHOWN_EVENT = "dock:shown";
+
 // Fired once OCR finishes on a screenshot capture that already exists and
 // was already shown -- distinct from CAPTURE_ADDED_EVENT ("capture:added",
 // used inline elsewhere) since nothing new landed, an existing capture just
