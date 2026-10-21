@@ -7,9 +7,11 @@ interface EditableBodyProps {
   editing: boolean;
   onSave: (body: string) => Promise<void>;
   onCancel: () => void;
+  /** Replaces the default text styling -- the Dock's clamped title. */
+  className?: string;
 }
 
-export function EditableBody({ capture, editing, onSave, onCancel }: EditableBodyProps) {
+export function EditableBody({ capture, editing, onSave, onCancel, className }: EditableBodyProps) {
   const [draft, setDraft] = useState(capture.body);
 
   // `draft` otherwise only reflects whatever `capture.body` was at mount --
@@ -30,7 +32,7 @@ export function EditableBody({ capture, editing, onSave, onCancel }: EditableBod
   }, [editing, capture.id]);
 
   if (!editing) {
-    return <MarkdownBody text={capture.body} className="text-sm text-neutral-800 dark:text-neutral-200" />;
+    return <MarkdownBody text={capture.body} className={className ?? "text-sm text-neutral-800 dark:text-neutral-200"} />;
   }
 
   return (

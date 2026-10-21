@@ -1,62 +1,92 @@
-import { agentName, elapsed } from "@/lib/format";
-import type { AgentRow } from "@/lib/types";
+import { elapsed } from "@/lib/format";
+import type { AgentRow, Capture } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Earned, StatusGlyph } from "./ui";
 
 interface AgentRowsProps {
   agents: AgentRow[];
+  /// The focused project's Now queue, to name the item a connected agent
+  /// has taken.
+  now: Capture[];
 }
 
-/// Every agent starling can see working on the focused project, so the
-/// Dock lists the ones that have not called a magpie tool yet alongside the
-/// ones that have. Earned: absent without starling, and when nothing is
-/// running here. A waiting agent reuses the "needs you" treatment the
-/// hand-back row already has (solid accent glyph, accent chip); the rest
-/// stay quiet.
-export function AgentRows({ agents }: AgentRowsProps) {
+/// Every agent starling can see working on the focused project, so the Dock
+/// lists the ones that have not called a magpie tool yet alongside the ones
+/// that have. Earned: absent without starling, and when nothing is running
+/// here.
+///
+/// A row answers three things in order: what the work is (the item it has
+/// taken, else the session's title, else its branch), who is doing it, and
+/// whether you need to act ("Needs you" is the only coloured word).
+export function AgentRows({ agents, now }: AgentRowsProps) {
   return (
     <Earned when={agents.length > 0}>
       <div className="flex flex-col gap-1">
         {agents.map((a) => (
-          <AgentRowItem key={a.starling_session} agent={a} />
+          <AgentRowItem key={a.starling_session} agent={a} now={now} />
         ))}
       </div>
     </Earned>
   );
 }
 
-function AgentRowItem({ agent }: { agent: AgentRow }) {
-  const known = agent.magpie_session !== null;
+function firstLine(body: string): string {
+  return body.split("\n")[0].trim();
+}
+
+function statusText(agent: AgentRow, since: string | null): string {
+  switch (agent.state) {
+    case "waiting":
+      return "Needs you";
+    case "working":
+      return since ? `Working ${since}` : "Working";
+    case "active":
+      return since ? `Active ${since}` : "Active";
+    default:
+      return since ? `Idle ${since}` : "Idle";
+  }
+}
+
+function AgentRowItem({ agent, now }: { agent: AgentRow; now: Capture[] }) {
+  const connected = agent.magpie_session !== null;
   const waiting = agent.state === "waiting";
-  const subject = agent.title ?? agent.branch;
-  const label = subject ? `${agentName(agent)} · ${subject}` : agentName(agent);
+  const leased = connected
+    ? now.find((c) => c.lease_session === agent.magpie_session)
+    : undefined;
+  const work = (leased && firstLine(leased.body)) || agent.title || agent.branch || "Untitled session";
   const since = agent.since ? elapsed(new Date(agent.since).toISOString()).toLowerCase() : null;
+  const status = statusText(agent, since);
+
+  const meta = ["Claude Code"];
+  if (agent.branch) meta.push(agent.branch);
+  meta.push(connected ? (agent.ordinal != null ? `S${agent.ordinal}` : "connected") : "not connected to magpie");
 
   return (
     <div
-      title={`${label} (${agent.state}${since ? `, ${since}` : ""})`}
+      title={`${work}\n${meta.join(" · ")}\n${status}`}
       className={cn(
-        "flex items-center gap-2 rounded-md border px-2 py-1.5 text-body-sm",
-        // A starling-only agent is drawn lighter than one magpie knows: a
-        // dashed hairline, like the human's own S0 card, and fainter text.
-        known ? "border-hairline-strong text-fg" : "border-dashed border-hairline text-fg-muted",
+        "flex flex-col gap-0.5 rounded-md border px-2.5 py-1.5",
+        waiting ? "border-accent-line bg-accent-tint" : "border-hairline",
       )}
     >
-      <StatusGlyph
-        state={waiting ? "handback" : agent.state === "working" ? "leased" : "open"}
-        size={10}
-      />
-      {/* The label is the only thing that gives way: it truncates, and the
-          status beside it never shrinks or overlaps. */}
-      <span className="min-w-0 flex-1 truncate whitespace-nowrap">{label}</span>
-      <span
-        className={cn(
-          "shrink-0 whitespace-nowrap",
-          waiting ? "font-medium text-accent" : "text-fg-faint",
-        )}
-      >
-        {waiting ? "waiting" : since}
-      </span>
+      <div className="flex items-center gap-2 text-body">
+        <StatusGlyph
+          state={waiting ? "handback" : agent.state === "working" ? "leased" : "open"}
+          size={10}
+        />
+        <span className="min-w-0 flex-1 truncate whitespace-nowrap text-fg">{work}</span>
+        <span
+          className={cn(
+            "shrink-0 whitespace-nowrap text-label",
+            waiting ? "font-medium text-accent" : "text-fg-faint",
+          )}
+        >
+          {status}
+        </span>
+      </div>
+      <div className="truncate whitespace-nowrap pl-[18px] text-label text-fg-faint">
+        {meta.join(" · ")}
+      </div>
     </div>
   );
 }

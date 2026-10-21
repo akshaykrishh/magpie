@@ -160,7 +160,7 @@ function AcrossApp() {
                 <Earned when={row.agents_waiting_count > 0}>
                   <span
                     className="flex shrink-0 items-center gap-1"
-                    title={`${row.agents_waiting_count} waiting for you`}
+                    title={`${row.agents_waiting_count} needs you`}
                   >
                     <StatusGlyph state="handback" size={8} />
                     <Mono size="xs" tone="accent">
@@ -186,10 +186,15 @@ function AcrossApp() {
                 <Chip variant="neutral">ON {current?.branch?.toUpperCase()}</Chip>
               </Earned>
               <Earned when={(current?.active_session_count ?? 0) > 0}>
-                <Chip variant="neutral">{current?.active_session_count} LIVE</Chip>
+                <span className="rounded-xs border border-hairline-strong px-1.5 py-0.5 text-label text-fg-muted">
+                  {current?.active_session_count}{" "}
+                  {current?.active_session_count === 1 ? "agent" : "agents"}
+                </span>
               </Earned>
               <Earned when={(current?.agents_waiting_count ?? 0) > 0}>
-                <Chip variant="accent">{current?.agents_waiting_count} WAITING</Chip>
+                <span className="rounded-xs border border-accent-line px-1.5 py-0.5 text-label font-medium text-accent">
+                  {current?.agents_waiting_count} needs you
+                </span>
               </Earned>
             </div>
           </Earned>

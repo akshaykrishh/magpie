@@ -98,7 +98,7 @@ export function DockCapturesView() {
               void handleCopy(c);
             }}
           >
-            <CaptureRow capture={c} />
+            <CaptureRow capture={c} compact />
           </div>
         ))}
       </div>

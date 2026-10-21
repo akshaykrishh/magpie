@@ -37,6 +37,8 @@ interface NowListProps {
   sessions?: Session[];
   onRevokeLease?: (id: number) => void;
   onOpenReview?: (capture: Capture) => void;
+  /** The Dock's rows -- see CaptureRow's `compact`. */
+  compact?: boolean;
 }
 
 /// "LEASED BY S1 · 12M" -- looked up from the session holding the lease,
@@ -51,6 +53,15 @@ function leaseLabelFor(capture: Capture, sessions: Session[]): string | undefine
   return `LEASED BY ${sessionLabel(session)} · ${elapsed(capture.lease_at)}`;
 }
 
+/// "Taken by S1 · 12m" -- the Dock's quiet counterpart to `leaseLabelFor`.
+function leaseSummaryFor(capture: Capture, sessions: Session[]): string | undefined {
+  if (!capture.lease_session || !capture.lease_at) return undefined;
+  const session = sessions.find((s) => s.id === capture.lease_session);
+  if (!session) return undefined;
+  const who = session.ordinal != null ? `S${session.ordinal}` : "an agent";
+  return `Taken by ${who} · ${elapsed(capture.lease_at).toLowerCase()}`;
+}
+
 export function NowList({
   items,
   onReorder,
@@ -63,6 +74,7 @@ export function NowList({
   sessions = [],
   onRevokeLease,
   onOpenReview,
+  compact,
 }: NowListProps) {
   const sectionSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -144,6 +156,7 @@ export function NowList({
                 sessions={sessions}
                 onRevokeLease={onRevokeLease}
                 onOpenReview={onOpenReview}
+                compact={compact}
               />
             ))}
           </SortableContext>
@@ -166,6 +179,7 @@ export function NowList({
               sessions={sessions}
               onRevokeLease={onRevokeLease}
               onOpenReview={onOpenReview}
+              compact={compact}
             />
           ))}
         </SortableContext>
@@ -191,6 +205,7 @@ function SortableSectionGroup({
   sessions,
   onRevokeLease,
   onOpenReview,
+  compact,
 }: {
   section: Section;
   captures: Capture[];
@@ -203,6 +218,7 @@ function SortableSectionGroup({
   sessions: Session[];
   onRevokeLease?: (id: number) => void;
   onOpenReview?: (capture: Capture) => void;
+  compact?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: section.id,
@@ -243,6 +259,7 @@ function SortableSectionGroup({
                 sessions={sessions}
                 onRevokeLease={onRevokeLease}
                 onOpenReview={onOpenReview}
+                compact={compact}
               />
             ))}
           </div>
@@ -260,6 +277,7 @@ function SortableCaptureRow({
   sessions,
   onRevokeLease,
   onOpenReview,
+  compact,
 }: {
   capture: Capture;
   onDone: (id: number) => void;
@@ -268,6 +286,7 @@ function SortableCaptureRow({
   sessions: Session[];
   onRevokeLease?: (id: number) => void;
   onOpenReview?: (capture: Capture) => void;
+  compact?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: capture.id,
@@ -289,6 +308,8 @@ function SortableCaptureRow({
         leaseLabel={leaseLabelFor(capture, sessions)}
         onRevokeLease={onRevokeLease ? () => onRevokeLease(capture.id) : undefined}
         onOpenReview={onOpenReview ? () => onOpenReview(capture) : undefined}
+        compact={compact}
+        leaseSummary={compact ? leaseSummaryFor(capture, sessions) : undefined}
       />
     </div>
   );

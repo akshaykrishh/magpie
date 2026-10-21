@@ -36,17 +36,10 @@ export function sessionLabel(session: {
   return `${label} · ${clientPart}`;
 }
 
-/// "S1 · Claude Code" for an agent that has called a magpie tool, plain
-/// "Claude Code" for one only starling has seen -- every starling session
-/// is a Claude Code session. Sentence case, like the Dock's other rows.
-export function agentName(agent: {
-  magpie_session: string | null;
-  ordinal: number | null;
-  client: string | null;
-}): string {
-  if (!agent.magpie_session) return "Claude Code";
-  const client = !agent.client || agent.client === "claude-code" ? "Claude Code" : agent.client;
-  return agent.ordinal != null ? `S${agent.ordinal} · ${client}` : client;
+/// "4m ago" -- `elapsed`, lowercased and worded for a quiet meta line.
+export function ago(iso: string, now: Date = new Date()): string {
+  const text = elapsed(iso, now).toLowerCase();
+  return text === "0m" ? "just now" : `${text} ago`;
 }
 
 export type NowRowState = "open" | "leased" | "pinned" | "handback" | "done";

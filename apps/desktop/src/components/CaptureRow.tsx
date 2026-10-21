@@ -4,7 +4,7 @@ import { GripVertical } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { CAPTURE_UPDATED_EVENT } from "@/lib/events";
-import type { NowRowState } from "@/lib/format";
+import { ago, parseDiffStat, type NowRowState } from "@/lib/format";
 import type { Blob as CaptureBlob, Capture, Project, Section, StreamRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Chip, Mono, StatusGlyph } from "./ui";
@@ -96,6 +96,13 @@ interface CaptureRowProps {
   /// on-screen rows via an IntersectionObserver is a real follow-up, not
   /// done in this pass -- see the redesign plan's stage 4 risk notes.
   streamRow?: StreamRow;
+
+  /// The Dock's row: a title clamped to two lines, then one quiet line of
+  /// meta ("4m ago · +64 −11 in 2 files") in the UI font, sentence case.
+  /// Everything else about the row (menu, drag, editing) is unchanged.
+  compact?: boolean;
+  /// Compact only: who has this item, e.g. "Taken by S1 · 12m".
+  leaseSummary?: string;
 }
 
 export function CaptureRow({
@@ -126,6 +133,8 @@ export function CaptureRow({
   onRevokeLease,
   onOpenReview,
   streamRow,
+  compact = false,
+  leaseSummary,
 }: CaptureRowProps) {
   const timestamp = formatDistanceToNow(new Date(capture.created_at), {
     addSuffix: true,
@@ -356,9 +365,19 @@ export function CaptureRow({
             editing={editing && !expanded}
             onSave={handleSaveEdit}
             onCancel={() => setEditing(false)}
+            className={compact ? "line-clamp-2 text-body text-fg" : undefined}
           />
         )}
 
+        {compact ? (
+          <CompactMeta
+            capture={capture}
+            nowState={nowState}
+            leaseSummary={leaseSummary}
+            onRevokeLease={onRevokeLease}
+            onOpenReview={onOpenReview}
+          />
+        ) : (
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
           <p className="text-xs text-neutral-400 dark:text-neutral-500">{timestamp}</p>
 
@@ -425,6 +444,7 @@ export function CaptureRow({
             </>
           )}
         </div>
+        )}
       </div>
 
       <div className="shrink-0">
@@ -525,4 +545,71 @@ export function CaptureRow({
 
     return items;
   }
+}
+
+/// The Dock row's one meta line: what happened and when, then who has it
+/// or what it needs. Separate pieces are muted text; only "Needs you" takes
+/// the attention colour, and nothing here wraps -- it truncates.
+function CompactMeta({
+  capture,
+  nowState,
+  leaseSummary,
+  onRevokeLease,
+  onOpenReview,
+}: {
+  capture: Capture;
+  nowState?: NowRowState;
+  leaseSummary?: string;
+  onRevokeLease?: () => void;
+  onOpenReview?: () => void;
+}) {
+  const diff = parseDiffStat(capture.diff_stat);
+  const changed =
+    diff && (diff.insertions > 0 || diff.deletions > 0) ? (
+      <span className="shrink-0 whitespace-nowrap">
+        <span className="text-fg">+{diff.insertions}</span>{" "}
+        <span className="text-danger">−{diff.deletions}</span> in {diff.filesChanged}{" "}
+        {diff.filesChanged === 1 ? "file" : "files"}
+      </span>
+    ) : null;
+
+  return (
+    <div className="mt-1 flex min-w-0 items-center gap-1.5 whitespace-nowrap text-label text-fg-faint">
+      <span className="shrink-0">{ago(capture.created_at)}</span>
+      {changed && <span aria-hidden>·</span>}
+      {changed}
+      {nowState === "handback" && (
+        <>
+          <span aria-hidden>·</span>
+          <span className="shrink-0 font-medium text-accent">Needs you</span>
+          {onOpenReview && (
+            <button type="button" onClick={onOpenReview} className="shrink-0 text-accent underline">
+              Review
+            </button>
+          )}
+        </>
+      )}
+      {nowState === "leased" && leaseSummary && (
+        <>
+          <span aria-hidden>·</span>
+          <span className="min-w-0 truncate" title={leaseSummary}>
+            {leaseSummary}
+          </span>
+          {onRevokeLease && (
+            <button type="button" onClick={onRevokeLease} className="shrink-0 hover:text-fg-muted">
+              Revoke
+            </button>
+          )}
+        </>
+      )}
+      {nowState === "pinned" && capture.branch && (
+        <>
+          <span aria-hidden>·</span>
+          <span className="min-w-0 truncate" title={`Pinned to ${capture.branch}`}>
+            On {capture.branch}
+          </span>
+        </>
+      )}
+    </div>
+  );
 }

@@ -1,6 +1,7 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
-import { CapacityDots, Chip, Earned, Mono } from "./components/ui";
+import { CapacityDots, Earned } from "./components/ui";
+import { cn } from "./lib/utils";
 import { DockActivityView } from "./dock/DockActivityView";
 import { DockCapturesView } from "./dock/DockCapturesView";
 import { DockNowView } from "./dock/DockNowView";
@@ -17,14 +18,15 @@ import { useProjectSignal } from "./state/useProjectSignal";
 
 const DEFAULT_NOW_CAP = 7;
 
-/// "rook-api 3 · 1 waiting" -- queued depth only when there is some, and
-/// only the parts that have something to say.
-function footerLabel(o: ProjectOverview): string {
-  const parts = [o.project_name];
-  if (o.now_count > 0) parts[0] += ` ${o.now_count}`;
-  if (o.needs_review_count > 0) parts.push(`${o.needs_review_count} needs review`);
-  if (o.agents_waiting_count > 0) parts.push(`${o.agents_waiting_count} waiting`);
-  return parts.join(" · ");
+/// What the footer says after a project's name: how much is queued, and
+/// how many things need you (hand-backs and waiting agents alike -- both
+/// are a human being needed). Empty parts are left out.
+function footerSuffix(o: ProjectOverview): string {
+  const needsYou = o.needs_review_count + o.agents_waiting_count;
+  const parts: string[] = [];
+  if (o.now_count > 0) parts.push(`${o.now_count} queued`);
+  if (needsYou > 0) parts.push(`${needsYou} needs you`);
+  return parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
 }
 
 /// The pinned dock: a compact, always-on-top view of Now, meant to sit
@@ -212,34 +214,39 @@ function DockApp() {
 
   return (
     <main className="flex h-screen flex-col gap-2 overflow-hidden bg-white/95 p-2 dark:bg-neutral-950/95">
-      <div className="flex items-center gap-1.5 px-0.5">
-        <div className="flex shrink-0 items-center gap-1.5">
+      {/* One line: which project, then how full Now is and how many agents
+          are around. Only the name gives way when the dock is narrow, and
+          the capacity dots go before it does. */}
+      <div className="flex items-center gap-2 px-0.5">
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate whitespace-nowrap text-body",
+            focused ? "text-fg" : "text-fg-faint",
+          )}
+          title={
+            focused
+              ? `${focused.project_name}${focused.branch ? ` on ${focused.branch}` : ""}`
+              : "Nothing focused: showing the Inbox"
+          }
+        >
+          {focused ? focused.project_name : "Inbox"}
+        </span>
+        <span
+          className="max-[259px]:hidden"
+          title={`Now holds ${now.length} of your ${nowCap}-item limit`}
+        >
           <CapacityDots filled={now.length} cap={nowCap} />
-          <Mono size="xs" tone="faint">
-            {now.length}/{nowCap}
-          </Mono>
-        </div>
-        {/* min-w-0 is what lets a flex item shrink below its content's
-            width at all; truncate then ellipsizes instead of wrapping,
-            which is what happens to a long project + branch name in a
-            300px dock without both. */}
-        <Earned when={focused != null}>
-          <Chip
-            variant="neutral"
-            className="min-w-[2.5rem] flex-1"
-            title={focused ? `${focused.project_name}${focused.branch ? ` on ${focused.branch}` : ""}` : undefined}
-          >
-            {focused?.project_name.toUpperCase()}
-            {focused?.branch ? ` · ON ${focused.branch.toUpperCase()}` : ""}
-          </Chip>
-        </Earned>
-        <Earned when={liveSessionCount > 0}>
-          <Mono size="xs" tone="accent" className="ml-auto shrink-0">
-            {liveSessionCount}
-            {/* The word goes first when the dock is at its narrowest. */}
-            <span className="max-[259px]:hidden"> LIVE</span>
-          </Mono>
-        </Earned>
+        </span>
+        <span className="shrink-0 whitespace-nowrap text-label text-fg-faint">
+          {now.length} of {nowCap} in Now
+          {liveSessionCount > 0 && (
+            // The agents go first when the dock is at its narrowest.
+            <span className="max-[299px]:hidden">
+              {" "}
+              · {liveSessionCount} {liveSessionCount === 1 ? "agent" : "agents"}
+            </span>
+          )}
+        </span>
       </div>
       <DockTabs active={tab} onChange={handleTabChange} />
       {tab === "now" && (
@@ -263,17 +270,28 @@ function DockApp() {
         <DockActivityView projectId={effectiveProjectId} sessions={sessions} />
       )}
       <Earned when={otherDepths.length > 0}>
-        <div className="flex flex-wrap items-center gap-1.5 border-t border-hairline px-0.5 pt-1.5">
-          {otherDepths.map((o) => (
-            <Chip
-              key={o.project_id}
-              variant={o.needs_review_count > 0 || o.agents_waiting_count > 0 ? "accent" : "neutral"}
-              title={footerLabel(o)}
-              onClick={() => setPeekedProjectId(o.project_id)}
-            >
-              {footerLabel(o).toUpperCase()}
-            </Chip>
-          ))}
+        <div className="flex flex-col gap-1 border-t border-hairline px-0.5 pt-1.5">
+          <span className="text-label text-fg-faint">Elsewhere</span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {otherDepths.map((o) => {
+              const needsYou = o.needs_review_count + o.agents_waiting_count > 0;
+              return (
+                <button
+                  key={o.project_id}
+                  type="button"
+                  title={`${o.project_name}${footerSuffix(o)}`}
+                  onClick={() => setPeekedProjectId(o.project_id)}
+                  className={cn(
+                    "inline-flex max-w-full items-center rounded-xs border px-1.5 py-0.5 text-label hover:opacity-80",
+                    needsYou ? "border-accent-line text-accent" : "border-hairline-strong text-fg-muted",
+                  )}
+                >
+                  <span className="min-w-0 truncate whitespace-nowrap">{o.project_name}</span>
+                  <span className="shrink-0 whitespace-nowrap">{footerSuffix(o)}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </Earned>
     </main>

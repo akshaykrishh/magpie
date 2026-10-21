@@ -39,7 +39,7 @@ export function DockNowView({
 }: DockNowViewProps) {
   return (
     <>
-      <AgentRows agents={agents} />
+      <AgentRows agents={agents} now={now} />
       <AddPromptInput onAdd={onAddPrompt} />
       <div className="flex-1 overflow-y-auto">
         <NowList
@@ -53,6 +53,7 @@ export function DockNowView({
           onReorderSection={onReorderSection}
           sessions={sessions}
           onRevokeLease={onRevokeLease}
+          compact
         />
       </div>
     </>
