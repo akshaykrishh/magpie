@@ -19,16 +19,31 @@ interface AgentRowsProps {
 /// taken, else the session's title, else its branch), who is doing it, and
 /// whether you need to act ("Needs you" is the only coloured word).
 export function AgentRows({ agents, now }: AgentRowsProps) {
+  // The most urgent few (the list arrives waiting-first); the rest collapse
+  // into one line so a busy project cannot push the queue out of a dock at
+  // its minimum height.
+  const shown = agents.slice(0, MAX_ROWS);
+  const hidden = agents.length - shown.length;
   return (
     <Earned when={agents.length > 0}>
       <div className="flex flex-col gap-1">
-        {agents.map((a) => (
+        {shown.map((a) => (
           <AgentRowItem key={a.starling_session} agent={a} now={now} />
         ))}
+        {hidden > 0 && (
+          <span
+            className="px-2.5 text-label text-fg-faint"
+            title={agents.slice(MAX_ROWS).map((a) => a.title ?? a.branch ?? "Untitled session").join("\n")}
+          >
+            +{hidden} more
+          </span>
+        )}
       </div>
     </Earned>
   );
 }
+
+const MAX_ROWS = 2;
 
 function firstLine(body: string): string {
   return body.split("\n")[0].trim();

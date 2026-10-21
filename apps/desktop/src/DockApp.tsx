@@ -270,28 +270,36 @@ function DockApp() {
         <DockActivityView projectId={effectiveProjectId} sessions={sessions} />
       )}
       <Earned when={otherDepths.length > 0}>
-        <div className="flex flex-col gap-1 border-t border-hairline px-0.5 pt-1.5">
-          <span className="text-label text-fg-faint">Elsewhere</span>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {otherDepths.map((o) => {
-              const needsYou = o.needs_review_count + o.agents_waiting_count > 0;
-              return (
-                <button
-                  key={o.project_id}
-                  type="button"
-                  title={`${o.project_name}${footerSuffix(o)}`}
-                  onClick={() => setPeekedProjectId(o.project_id)}
-                  className={cn(
-                    "inline-flex max-w-full items-center rounded-xs border px-1.5 py-0.5 text-label hover:opacity-80",
-                    needsYou ? "border-accent-line text-accent" : "border-hairline-strong text-fg-muted",
-                  )}
-                >
-                  <span className="min-w-0 truncate whitespace-nowrap">{o.project_name}</span>
-                  <span className="shrink-0 whitespace-nowrap">{footerSuffix(o)}</span>
-                </button>
-              );
-            })}
-          </div>
+        {/* One line, always: a label, the first two projects (their names
+            truncate, their counts do not), then "+N" for the rest. */}
+        <div className="flex items-center gap-1.5 overflow-hidden border-t border-hairline px-0.5 pt-1.5">
+          <span className="shrink-0 text-label text-fg-faint">Elsewhere</span>
+          {otherDepths.slice(0, 2).map((o) => {
+            const needsYou = o.needs_review_count + o.agents_waiting_count > 0;
+            return (
+              <button
+                key={o.project_id}
+                type="button"
+                title={`${o.project_name}${footerSuffix(o)}`}
+                onClick={() => setPeekedProjectId(o.project_id)}
+                className={cn(
+                  "inline-flex min-w-0 items-center rounded-xs border px-1.5 py-0.5 text-label hover:opacity-80",
+                  needsYou ? "border-accent-line text-accent" : "border-hairline-strong text-fg-muted",
+                )}
+              >
+                <span className="min-w-0 truncate whitespace-nowrap">{o.project_name}</span>
+                <span className="shrink-0 whitespace-nowrap">{footerSuffix(o)}</span>
+              </button>
+            );
+          })}
+          {otherDepths.length > 2 && (
+            <span
+              className="shrink-0 text-label text-fg-faint"
+              title={otherDepths.slice(2).map((o) => `${o.project_name}${footerSuffix(o)}`).join("\n")}
+            >
+              +{otherDepths.length - 2}
+            </span>
+          )}
         </div>
       </Earned>
     </main>
