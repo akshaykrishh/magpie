@@ -92,7 +92,7 @@ function AgentRowItem({ agent, now }: { agent: AgentRow; now: Capture[] }) {
         <span className="min-w-0 flex-1 truncate whitespace-nowrap text-fg">{work}</span>
         <span
           className={cn(
-            "shrink-0 whitespace-nowrap text-label",
+            "shrink-0 whitespace-nowrap text-[11px]",
             waiting ? "font-medium text-accent" : "text-fg-faint",
           )}
         >

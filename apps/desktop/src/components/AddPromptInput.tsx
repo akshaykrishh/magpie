@@ -3,9 +3,11 @@ import { useState } from "react";
 
 interface AddPromptInputProps {
   onAdd: (body: string) => void;
+  /** The Dock passes a shorter one that fits its width. */
+  placeholder?: string;
 }
 
-export function AddPromptInput({ onAdd }: AddPromptInputProps) {
+export function AddPromptInput({ onAdd, placeholder = "Type a prompt to queue…" }: AddPromptInputProps) {
   const [value, setValue] = useState("");
 
   function submit() {
@@ -24,8 +26,8 @@ export function AddPromptInput({ onAdd }: AddPromptInputProps) {
         onKeyDown={(e) => {
           if (e.key === "Enter") submit();
         }}
-        placeholder="Type a prompt to queue…"
-        className="flex-1 rounded-lg border border-hairline bg-surface px-3 py-2 text-sm
+        placeholder={placeholder}
+        className="min-w-0 flex-1 text-ellipsis rounded-lg border border-hairline bg-surface px-3 py-2 text-sm
                    text-fg placeholder:text-fg-faint focus:border-accent-line
                    focus:outline-none"
       />

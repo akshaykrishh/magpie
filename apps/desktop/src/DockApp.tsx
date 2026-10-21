@@ -210,17 +210,32 @@ function DockApp() {
   const liveSessionCount =
     sessions.filter((s) => s.ended_at === null).length +
     agents.filter((a) => a.magpie_session === null).length;
+  const overBy = Math.max(0, now.length - nowCap);
+  const agentWord = liveSessionCount === 1 ? "agent" : "agents";
+  const agentPart = liveSessionCount > 0 ? ` · ${liveSessionCount} ${agentWord}` : "";
+  // Over the limit reads as a number to act on, not as "10 of 7".
+  const metaFull =
+    overBy > 0
+      ? `${now.length} in Now · ${overBy} over limit${agentPart}`
+      : `${now.length} of ${nowCap} in Now${agentPart}`;
+  const metaShort =
+    overBy > 0 ? `${now.length} · ${overBy} over${agentPart}` : `${now.length}/${nowCap}${agentPart}`;
+  const capacityTitle =
+    overBy > 0
+      ? `Now holds ${now.length}, ${overBy} over your ${nowCap}-item limit`
+      : `Now holds ${now.length} of your ${nowCap}-item limit`;
   const focusedAgents = agents.filter((a) => a.project_id === effectiveProjectId);
 
   return (
     <main className="flex h-screen flex-col gap-2 overflow-hidden bg-white/95 p-2 dark:bg-neutral-950/95">
       {/* One line: which project, then how full Now is and how many agents
-          are around. Only the name gives way when the dock is narrow, and
-          the capacity dots go before it does. */}
+          are around. The name has priority and grows; the meta is fixed and
+          shortens itself as the dock narrows. (text-[13px], not text-body,
+          because cn() would drop text-body in favour of the colour class.) */}
       <div className="flex items-center gap-2 px-0.5">
         <span
           className={cn(
-            "min-w-0 flex-1 truncate whitespace-nowrap text-body",
+            "min-w-0 flex-1 truncate whitespace-nowrap text-[13px]",
             focused ? "text-fg" : "text-fg-faint",
           )}
           title={
@@ -231,21 +246,23 @@ function DockApp() {
         >
           {focused ? focused.project_name : "Inbox"}
         </span>
-        <span
-          className="max-[259px]:hidden"
-          title={`Now holds ${now.length} of your ${nowCap}-item limit`}
-        >
-          <CapacityDots filled={now.length} cap={nowCap} />
-        </span>
-        <span className="shrink-0 whitespace-nowrap text-label text-fg-faint">
-          {now.length} of {nowCap} in Now
-          {liveSessionCount > 0 && (
-            // The agents go first when the dock is at its narrowest.
-            <span className="max-[299px]:hidden">
-              {" "}
-              · {liveSessionCount} {liveSessionCount === 1 ? "agent" : "agents"}
-            </span>
-          )}
+        <span className="flex shrink-0 items-center gap-1.5">
+          <span title={capacityTitle} className="flex items-center gap-1">
+            <CapacityDots filled={now.length} cap={nowCap} size={5} className="gap-0.5" />
+            {overBy > 0 && <span className="text-label text-accent">+{overBy}</span>}
+          </span>
+          {/* The sentence has room only in a wide dock; otherwise the same
+              facts in fewer words, with the sentence as the tooltip. */}
+          <span
+            title={metaFull}
+            className={cn(
+              "whitespace-nowrap text-[11px]",
+              overBy > 0 ? "text-accent" : "text-fg-faint",
+            )}
+          >
+            <span className="max-[379px]:hidden">{metaFull}</span>
+            <span className="min-[380px]:hidden">{metaShort}</span>
+          </span>
         </span>
       </div>
       <DockTabs active={tab} onChange={handleTabChange} />
@@ -272,9 +289,9 @@ function DockApp() {
       <Earned when={otherDepths.length > 0}>
         {/* One line, always: a label, the first two projects (their names
             truncate, their counts do not), then "+N" for the rest. */}
-        <div className="flex items-center gap-1.5 overflow-hidden border-t border-hairline px-0.5 pt-1.5">
+        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden border-t border-hairline px-0.5 pt-1.5">
           <span className="shrink-0 text-label text-fg-faint">Elsewhere</span>
-          {otherDepths.slice(0, 2).map((o) => {
+          {otherDepths.slice(0, 2).map((o, i) => {
             const needsYou = o.needs_review_count + o.agents_waiting_count > 0;
             return (
               <button
@@ -283,7 +300,11 @@ function DockApp() {
                 title={`${o.project_name}${footerSuffix(o)}`}
                 onClick={() => setPeekedProjectId(o.project_id)}
                 className={cn(
-                  "inline-flex min-w-0 items-center rounded-xs border px-1.5 py-0.5 text-label hover:opacity-80",
+                  // min-w-0 and overflow-hidden let the name give way; the
+                  // suffix beside it is shrink-0 and never does. The second
+                  // chip only appears where two fit.
+                  "inline-flex min-w-0 items-center overflow-hidden rounded-xs border px-1.5 py-0.5 text-[11px] hover:opacity-80",
+                  i > 0 && "max-[339px]:hidden",
                   needsYou ? "border-accent-line text-accent" : "border-hairline-strong text-fg-muted",
                 )}
               >
@@ -292,11 +313,13 @@ function DockApp() {
               </button>
             );
           })}
+          {otherDepths.length > 1 && (
+            <span className="shrink-0 text-label text-fg-faint min-[340px]:hidden">
+              +{otherDepths.length - 1}
+            </span>
+          )}
           {otherDepths.length > 2 && (
-            <span
-              className="shrink-0 text-label text-fg-faint"
-              title={otherDepths.slice(2).map((o) => `${o.project_name}${footerSuffix(o)}`).join("\n")}
-            >
+            <span className="shrink-0 text-label text-fg-faint max-[339px]:hidden">
               +{otherDepths.length - 2}
             </span>
           )}

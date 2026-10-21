@@ -82,7 +82,7 @@ export function DockCapturesView() {
         placeholder="Search captures…"
         className="w-full rounded-sm border border-hairline bg-surface px-2 py-1 text-body-sm text-fg placeholder:text-fg-faint"
       />
-      <AddPromptInput onAdd={handleAdd} />
+      <AddPromptInput onAdd={handleAdd} placeholder="Add a capture…" />
       <div className="flex-1 overflow-y-auto">
         {items.length === 0 && (
           <p className="px-1 py-4 text-center text-body-sm text-fg-faint">

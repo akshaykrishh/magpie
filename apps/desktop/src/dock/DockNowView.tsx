@@ -40,7 +40,7 @@ export function DockNowView({
   return (
     <>
       <AgentRows agents={agents} now={now} />
-      <AddPromptInput onAdd={onAddPrompt} />
+      <AddPromptInput onAdd={onAddPrompt} placeholder="Add to Now…" />
       <div className="flex-1 overflow-y-auto">
         <NowList
           items={now}

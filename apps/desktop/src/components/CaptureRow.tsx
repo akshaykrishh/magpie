@@ -365,7 +365,7 @@ export function CaptureRow({
             editing={editing && !expanded}
             onSave={handleSaveEdit}
             onCancel={() => setEditing(false)}
-            className={compact ? "line-clamp-2 text-body text-fg" : undefined}
+            className={compact ? "line-clamp-2 text-[13px] text-fg" : undefined}
           />
         )}
 
