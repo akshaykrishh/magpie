@@ -47,6 +47,11 @@ const STREAMS_TTL: Duration = Duration::from_secs(30);
 /// A folder's git facts barely change; this is what keeps a dozen sessions
 /// from costing a dozen git calls every five seconds.
 const PLACE_TTL: Duration = Duration::from_secs(60);
+/// How long a transient failure keeps the last good answer on screen: two
+/// polls, so one timeout does not make every row blink out and back.
+const GRACE: Duration = Duration::from_secs(10);
+/// With no window showing nobody is looking, so ask this rarely.
+const HIDDEN_INTERVAL: Duration = Duration::from_secs(30);
 /// After "not found" or a bad answer, how long before trying again on its
 /// own (a window regaining focus can ask sooner).
 const RETRY_AFTER: Duration = Duration::from_secs(30);
@@ -67,6 +72,16 @@ struct Inner {
     retry_at: Option<Instant>,
     streams: Option<(Instant, Vec<StreamEntry>)>,
     places: HashMap<String, (Instant, Place)>,
+}
+
+impl Inner {
+    /// Whether a fresh snapshot is wanted: the last one is older than
+    /// `interval`, and a recent failure is not still being waited out.
+    fn due(&self, now: Instant, interval: Duration) -> bool {
+        let fresh = self.fetched.is_some_and(|t| now < t + interval);
+        let backing_off = self.retry_at.is_some_and(|t| now < t);
+        !fresh && !backing_off
+    }
 }
 
 pub struct Starling {
@@ -115,10 +130,16 @@ impl Starling {
             if matches!(inner.binary, Binary::Missing(_)) {
                 return;
             }
-            let now = Instant::now();
-            let fresh = inner.fetched.is_some_and(|t| now < t + MIN_INTERVAL);
-            let backing_off = inner.retry_at.is_some_and(|t| now < t);
-            if fresh || backing_off {
+            let any_window_shown = app
+                .webview_windows()
+                .values()
+                .any(|w| w.is_visible().unwrap_or(false));
+            let interval = if any_window_shown {
+                MIN_INTERVAL
+            } else {
+                HIDDEN_INTERVAL
+            };
+            if !inner.due(Instant::now(), interval) {
                 return;
             }
         }
@@ -169,7 +190,17 @@ impl Starling {
             return self.publish(None);
         };
         let Some(sessions) = contract::fetch_sessions(&binary, self.call_timeout) else {
-            self.lock().retry_at = Some(Instant::now() + RETRY_AFTER);
+            let mut inner = self.lock();
+            let now = Instant::now();
+            // A blip: keep showing the last good answer for a grace period
+            // and look again at the next poll. Past it, starling is treated
+            // as gone and checked on the slow schedule.
+            if inner.fetched.is_some_and(|t| now < t + GRACE) {
+                inner.retry_at = Some(now + MIN_INTERVAL);
+                return false;
+            }
+            inner.retry_at = Some(now + RETRY_AFTER);
+            drop(inner);
             return self.publish(None);
         };
 
@@ -562,6 +593,46 @@ mod tests {
     }
 
     #[test]
+    fn one_bad_answer_keeps_the_last_good_one_for_a_grace_period() {
+        let tmp = TempDir::new();
+        let store = Store::open_in_memory().unwrap();
+        let bin = fake_starling(tmp.path(), Some(r#"{"schema":1,"sessions":[]}"#), None);
+        let starling = Starling::with_call_timeout(PATIENT);
+        starling.refresh(&locator_for(&bin), &store);
+
+        fake_starling(tmp.path(), Some("starling is having a moment"), None);
+        assert!(
+            !starling.refresh(&locator_for(&bin), &store),
+            "nothing for the windows to hear"
+        );
+        assert!(
+            starling.agents(&store).present,
+            "rows do not blink out on one failure"
+        );
+        assert!(starling.lock().retry_at.is_some());
+    }
+
+    #[test]
+    fn a_refresh_is_due_on_the_interval_and_not_while_backing_off() {
+        let starling = Starling::new();
+        let now = Instant::now();
+        let mut inner = starling.lock();
+        assert!(inner.due(now, MIN_INTERVAL), "nothing fetched yet");
+
+        inner.fetched = Some(now);
+        assert!(!inner.due(now + Duration::from_secs(1), MIN_INTERVAL));
+        assert!(inner.due(now + MIN_INTERVAL, MIN_INTERVAL));
+        assert!(
+            !inner.due(now + MIN_INTERVAL, HIDDEN_INTERVAL),
+            "with no window showing it waits longer"
+        );
+        assert!(inner.due(now + HIDDEN_INTERVAL, HIDDEN_INTERVAL));
+
+        inner.retry_at = Some(now + RETRY_AFTER);
+        assert!(!inner.due(now + Duration::from_secs(10), MIN_INTERVAL));
+    }
+
+    #[test]
     fn starling_going_bad_after_a_good_answer_withdraws_the_feature() {
         let tmp = TempDir::new();
         let store = Store::open_in_memory().unwrap();
@@ -570,6 +641,8 @@ mod tests {
         starling.refresh(&locator_for(&bin), &store);
         assert!(starling.agents(&store).present);
 
+        // Past the grace period, a bad answer is no longer a blip.
+        starling.lock().fetched = Some(Instant::now() - GRACE - Duration::from_secs(1));
         fake_starling(tmp.path(), Some(r#"{"schema":9,"sessions":[]}"#), None);
         assert!(
             starling.refresh(&locator_for(&bin), &store),
