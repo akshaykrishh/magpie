@@ -27,6 +27,9 @@ serde.workspace = true
 serde_json.workspace = true
 magpie-core.workspace = true
 magpie-capture.workspace = true
+# `detect_in`: the same folder-to-project identity the MCP server files
+# under, which is how a starling session's cwd is matched to a project.
+magpie-mcp.workspace = true
 base64 = "0.22"
 # Formats Update.date (an OffsetDateTime) as RFC3339 for the frontend --
 # mirrors tauri-plugin-updater's own commands.rs, which does the same

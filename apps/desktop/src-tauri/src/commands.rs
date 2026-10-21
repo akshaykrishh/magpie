@@ -2,13 +2,13 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use magpie_capture::Capabilities;
 use magpie_core::{
-    AuditEntry, AuditEntryView, Blob, Capture, Project, ProjectOverview, Section, Session,
-    StreamRow, Tag, Template,
+    AuditEntry, AuditEntryView, Blob, Capture, Project, Section, Session, StreamRow, Tag, Template,
 };
 use serde::Deserialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
+use crate::starling::{augment_overview, ProjectOverviewView};
 use crate::state::AppState;
 
 /// A dedicated wire type for "which slice of the stream" rather than
@@ -191,8 +191,16 @@ pub fn list_sessions(state: State<AppState>, project_id: Option<i64>) -> CmdResu
 }
 
 #[tauri::command]
-pub fn list_projects_overview(state: State<AppState>) -> CmdResult<Vec<ProjectOverview>> {
-    map_err(state.store.list_projects_overview())
+pub fn list_projects_overview(
+    app: AppHandle,
+    state: State<AppState>,
+) -> CmdResult<Vec<ProjectOverviewView>> {
+    let overview = map_err(state.store.list_projects_overview())?;
+    // Core's rollup is untouched; starling's agents are merged in here, in
+    // the app layer. A no-op without starling.
+    state.starling.touch(&app);
+    let agents = state.starling.agents(&state.store).agents;
+    Ok(augment_overview(overview, &agents))
 }
 
 #[tauri::command]

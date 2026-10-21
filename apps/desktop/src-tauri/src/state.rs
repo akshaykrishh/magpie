@@ -1,10 +1,11 @@
 use std::sync::atomic::AtomicU64;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use magpie_capture::CaptureBackend;
 use magpie_core::Store;
 
 use crate::aim::AimSession;
+use crate::starling::Starling;
 
 /// A capture whose destination project was guessed (not yet committed --
 /// see docs/design.md "nothing is ever auto-filed") and is waiting to see
@@ -39,6 +40,9 @@ pub struct AppState {
     /// this process's own start time, not "since you sat down" or any
     /// other human-activity heuristic magpie has no way to know.
     pub app_started_at: String,
+    /// The optional starling integration -- see starling/mod.rs. An `Arc`
+    /// so its background refresh can outlive the command that asked for it.
+    pub starling: Arc<Starling>,
 }
 
 impl AppState {
@@ -50,6 +54,7 @@ impl AppState {
             aim_session: Mutex::new(None),
             aim_generation: AtomicU64::new(0),
             app_started_at: magpie_core::now_iso(),
+            starling: Arc::new(Starling::new()),
         }
     }
 }

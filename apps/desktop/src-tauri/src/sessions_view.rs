@@ -1,6 +1,9 @@
 use serde::Serialize;
-use tauri::State;
+use std::collections::HashSet;
 
+use tauri::{AppHandle, State};
+
+use crate::starling::AgentsView;
 use crate::state::AppState;
 
 type CmdResult<T> = Result<T, String>;
@@ -48,6 +51,9 @@ pub struct SessionView {
     /// Non-empty only for S0, most-frequent first. Always empty for a real
     /// session -- an agent doesn't have a "source app".
     pub top_source_apps: Vec<SourceAppCount>,
+    /// True when starling reports this session's agent as waiting for the
+    /// human. Always false without starling, and for S0.
+    pub waiting_for_you: bool,
 }
 
 const TOP_SOURCE_APPS_LIMIT: i64 = 3;
@@ -60,7 +66,16 @@ const TOP_SOURCE_APPS_LIMIT: i64 = 3;
 /// rest of the main window (see the redesign plan's "there is no default
 /// focused project").
 #[tauri::command]
-pub fn list_sessions_view(state: State<AppState>) -> CmdResult<Vec<SessionView>> {
+pub fn list_sessions_view(app: AppHandle, state: State<AppState>) -> CmdResult<Vec<SessionView>> {
+    state.starling.touch(&app);
+    let waiting: HashSet<String> = state
+        .starling
+        .agents(&state.store)
+        .agents
+        .into_iter()
+        .filter(|a| a.state == crate::starling::SessionState::Waiting)
+        .filter_map(|a| a.magpie_session)
+        .collect();
     let sessions = map_err(state.store.list_sessions(None))?
         .into_iter()
         .filter(|s| s.ended_at.is_none());
@@ -72,6 +87,7 @@ pub fn list_sessions_view(state: State<AppState>) -> CmdResult<Vec<SessionView>>
             is_synthetic: false,
             client: s.client,
             branch: s.branch,
+            waiting_for_you: waiting.contains(&s.id),
             started_at: s.started_at,
             holds: holds.get(&s.id).copied().unwrap_or(0),
             drained: s.completed_count,
@@ -105,7 +121,18 @@ pub fn list_sessions_view(state: State<AppState>) -> CmdResult<Vec<SessionView>>
         handback_count: 0,
         captures_since: Some(captures_since),
         top_source_apps,
+        waiting_for_you: false,
     }];
     result.append(&mut views);
     Ok(result)
+}
+
+/// The agents starling can see, for the Dock -- empty and `present: false`
+/// without starling. Reads the last snapshot from memory and asks for a
+/// fresh one in the background (see starling/mod.rs), so it is as cheap as
+/// any other command here.
+#[tauri::command]
+pub fn list_agents(app: AppHandle, state: State<AppState>) -> AgentsView {
+    state.starling.touch(&app);
+    state.starling.agents(&state.store)
 }

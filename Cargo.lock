@@ -877,6 +877,7 @@ dependencies = [
  "libc",
  "magpie-capture",
  "magpie-core",
+ "magpie-mcp",
  "serde",
  "serde_json",
  "tauri",

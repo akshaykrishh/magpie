@@ -7,6 +7,7 @@ mod panels;
 mod purge_sweep;
 mod sessions_view;
 mod settings_commands;
+mod starling;
 mod state;
 mod toast;
 mod tray;
@@ -180,6 +181,7 @@ pub fn run() {
             commands::count_unfiled,
             commands::show_settings_window,
             sessions_view::list_sessions_view,
+            sessions_view::list_agents,
             commands::send_back_for_rework,
             commands::copy_text,
             commands::get_capture_blob,
@@ -207,6 +209,13 @@ pub fn run() {
         .on_window_event(|window, event| {
             if matches!(window.label(), "main" | "dock" | "settings") {
                 tray::hide_instead_of_close(window, event);
+            }
+            // A window coming forward is the cheap moment to notice that
+            // starling was installed (or removed) since the last look.
+            if let tauri::WindowEvent::Focused(true) = event {
+                if let Some(state) = window.app_handle().try_state::<state::AppState>() {
+                    state.starling.recheck(window.app_handle());
+                }
             }
         })
         .setup(move |app| {
