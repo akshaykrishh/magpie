@@ -12,25 +12,81 @@ export interface ContextMenuItem {
   destructive?: boolean;
 }
 
-function toNative(item: ContextMenuItem): MenuItemOptions | SubmenuOptions {
-  if (item.submenu) {
+/// What makes two item lists the same native menu: their shape, labels and
+/// enabled state. Click handlers are deliberately not part of it -- they
+/// change with every render and are looked up at click time (see `Entry`).
+function shapeKey(items: ContextMenuItem[]): string {
+  return JSON.stringify(
+    items.map(function walk(item): unknown {
+      return [item.label, !!item.disabled, item.submenu?.map(walk)];
+    }),
+  );
+}
+
+/// The click handlers of `items` in the order `toNative` visits them.
+function handlersOf(items: ContextMenuItem[]): Array<(() => void) | undefined> {
+  return items.flatMap((item) => (item.submenu ? handlersOf(item.submenu) : [item.onClick]));
+}
+
+/// A native menu plus the handlers its items call. The menu is built once
+/// per shape; each popup swaps in the current handlers, so a reused menu
+/// never runs a click handler from a render that is gone.
+interface Entry {
+  menu: Menu;
+  handlers: Array<(() => void) | undefined>;
+}
+
+function toNative(items: ContextMenuItem[], entry: { handlers: Entry["handlers"] }) {
+  let next = 0;
+  const build = (item: ContextMenuItem): MenuItemOptions | SubmenuOptions => {
+    if (item.submenu) {
+      return { text: item.label, enabled: !item.disabled, items: item.submenu.map(build) };
+    }
+    const index = next++;
     return {
       text: item.label,
       enabled: !item.disabled,
-      items: item.submenu.map(toNative),
+      action: () => entry.handlers[index]?.(),
     };
-  }
-  return {
-    text: item.label,
-    enabled: !item.disabled,
-    action: () => item.onClick?.(),
   };
+  return items.map(build);
 }
 
-// The previous menu stays alive until the next one opens: its item actions
-// are delivered after `popup` resolves, so closing it any earlier could drop
-// the click that just chose something.
-let last: Menu | null = null;
+// Tauri registers a channel for every menu and item it creates and never
+// removes it (`close()` frees the menu itself, not those channels), so a
+// menu built per popup would grow the host's table for as long as the app
+// runs. Menus are therefore built once per distinct shape and reused. The
+// cache is least-recently-used and capped, so even a long session that sees
+// many shapes (a menu lists project and section names) stays bounded: an
+// evicted menu is closed and rebuilt if its shape comes back.
+const MAX_CACHED_MENUS = 24;
+const cache = new Map<string, Promise<Entry>>();
+
+function menuFor(items: ContextMenuItem[]): Promise<Entry> {
+  const key = shapeKey(items);
+  const hit = cache.get(key);
+  if (hit) {
+    cache.delete(key);
+    cache.set(key, hit);
+    return hit;
+  }
+  const entry = { handlers: [] as Entry["handlers"] };
+  const created = Menu.new({ items: toNative(items, entry) }).then(
+    (menu) => Object.assign(entry, { menu }) as Entry,
+  );
+  // A failed build must not stay cached as a failure.
+  created.catch(() => cache.get(key) === created && cache.delete(key));
+  cache.set(key, created);
+  while (cache.size > MAX_CACHED_MENUS) {
+    const [oldest] = cache.keys();
+    const evicted = cache.get(oldest);
+    cache.delete(oldest);
+    // Its item actions are delivered after `popup` resolves; by the time
+    // 24 other menus have opened, that is long done.
+    void evicted?.then((e) => e.menu.close()).catch(() => {});
+  }
+  return created;
+}
 
 // When the pointer last pressed or right-clicked in this window. A menu
 // opened by the mouse belongs at the cursor -- exactly where the click was --
@@ -52,10 +108,9 @@ const POINTER_FRESH_MS = 500;
 /// and it gets the system's own keyboard navigation and accessibility.
 export async function popupMenu(items: ContextMenuItem[], at: { x: number; y: number }) {
   if (!("__TAURI_INTERNALS__" in window)) return;
-  const menu = await Menu.new({ items: items.map(toNative) });
-  const previous = last;
-  last = menu;
-  void previous?.close();
+  const entry = await menuFor(items);
+  entry.handlers = handlersOf(items);
   const byMouse = Date.now() - lastPointerAt < POINTER_FRESH_MS;
+  const { menu } = entry;
   await (byMouse ? menu.popup() : menu.popup(new LogicalPosition(at.x, at.y)));
 }
