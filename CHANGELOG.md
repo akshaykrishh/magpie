@@ -16,6 +16,15 @@ version.
 
 ## [Unreleased]
 
+### Added
+
+- `magpie now --json [--project <dir>] [--branch <name>]` and `magpie sessions --json [--live]`:
+  read-only, schema-versioned JSON for other tools to consume. `--project` resolves a folder
+  exactly as the MCP server resolves its spawn directory, and an unknown folder reports
+  `"project": null` instead of creating one. Neither command creates the database, sweeps dead
+  pids, or touches leases. The contract is in `docs/integration.md`, which also describes how
+  magpie pairs with starling.
+
 ## [0.1.1] - 2026-08-04
 
 ### Security

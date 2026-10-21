@@ -55,6 +55,7 @@ hands can empty.
   auto-expired.
 - **A CLI for everything else.** `magpie add|list|search|done|drain|export|serve-mcp` —
   scriptable, and `drain` pipes `Now` straight into an agent CLI that doesn't speak MCP.
+  Pairs with [starling](docs/integration.md) when it's installed.
 - **Prompt packs.** `magpie pack add github:someone/agent-prompts` imports shareable,
   fill-in-the-blank prompt templates from any git repo.
 - **Sessions, handback, and digests.** An MCP-connected agent's session is a persistent record;
