@@ -249,7 +249,6 @@ function DockApp() {
         <span className="flex shrink-0 items-center gap-1.5">
           <span title={capacityTitle} className="flex items-center gap-1">
             <CapacityDots filled={now.length} cap={nowCap} size={5} className="gap-0.5" />
-            {overBy > 0 && <span className="text-label text-accent">+{overBy}</span>}
           </span>
           {/* The sentence has room only in a wide dock; otherwise the same
               facts in fewer words, with the sentence as the tooltip. */}
