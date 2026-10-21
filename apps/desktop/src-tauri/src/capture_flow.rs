@@ -345,23 +345,41 @@ pub fn on_capture_hotkey_released(app: &AppHandle) {
     };
 
     let aimed = crate::aim::resolve_if_active(app, pending.capture_id);
-    let project_id = aimed.as_ref().map_or(pending.project_id, |d| d.project_id);
 
-    if let Err(e) = state
-        .store
-        .file_capture(pending.capture_id, project_id, "guessed")
-    {
-        eprintln!("magpie: failed to confirm guessed project: {e}");
+    if let Err(e) = file_resolved(
+        &state.store,
+        pending.capture_id,
+        pending.project_id,
+        aimed.as_ref(),
+    ) {
+        eprintln!("magpie: failed to file the capture: {e}");
         return;
     }
-    // Aiming at a starling stream on a non-default branch also pins the
-    // item to that branch, the way a stream is (project + branch).
-    if let Some(branch) = aimed.as_ref().and_then(|d| d.branch.as_deref()) {
-        if let Err(e) = state.store.pin_to_branch(pending.capture_id, Some(branch)) {
+    let _ = app.emit("capture:updated", pending.capture_id);
+}
+
+/// Files a capture once its gesture has resolved. A hold-to-aim pick is the
+/// human's explicit choice, so it is recorded `"certain"` (`file_capture`'s
+/// own words); the toast's one-tap confirmation of the proposed guess stays
+/// `"guessed"`. A stream on a non-default branch also pins the item to that
+/// branch, the way a stream is (project + branch).
+fn file_resolved(
+    store: &magpie_core::Store,
+    capture_id: i64,
+    guessed_project_id: i64,
+    aimed: Option<&crate::aim::Destination>,
+) -> magpie_core::Result<()> {
+    let (project_id, confidence) = match aimed {
+        Some(d) => (d.project_id, "certain"),
+        None => (guessed_project_id, "guessed"),
+    };
+    store.file_capture(capture_id, project_id, confidence)?;
+    if let Some(branch) = aimed.and_then(|d| d.branch.as_deref()) {
+        if let Err(e) = store.pin_to_branch(capture_id, Some(branch)) {
             eprintln!("magpie: failed to pin capture to the stream's branch: {e}");
         }
     }
-    let _ = app.emit("capture:updated", pending.capture_id);
+    Ok(())
 }
 
 /// The desktop app's own guess at where a capture belongs: the single most
@@ -458,5 +476,66 @@ mod tests {
             }
             other => panic!("expected a guess, got {other:?}"),
         }
+    }
+
+    fn destination(project_id: i64, branch: Option<&str>) -> crate::aim::Destination {
+        crate::aim::Destination {
+            project_id,
+            project_name: "p".to_string(),
+            stream: branch.map(|_| "s".to_string()),
+            branch: branch.map(str::to_string),
+            stream_dir: None,
+        }
+    }
+
+    #[test]
+    fn tapping_to_confirm_the_guess_records_guessed() {
+        let store = magpie_core::Store::open_in_memory().unwrap();
+        let guess = store
+            .get_or_create_project("a", None, Some("/a/.git"))
+            .unwrap();
+        let capture = store.capture("x", None).unwrap();
+
+        file_resolved(&store, capture.id, guess.id, None).unwrap();
+
+        let filed = store.get_capture(capture.id).unwrap();
+        assert_eq!(filed.project_id, Some(guess.id));
+        assert_eq!(filed.filed_confidence.as_deref(), Some("guessed"));
+    }
+
+    #[test]
+    fn an_explicit_aim_pick_records_certain_for_projects_and_streams() {
+        let store = magpie_core::Store::open_in_memory().unwrap();
+        let guess = store
+            .get_or_create_project("a", None, Some("/a/.git"))
+            .unwrap();
+        let other = store
+            .get_or_create_project("b", None, Some("/b/.git"))
+            .unwrap();
+
+        let project_pick = store.capture("x", None).unwrap();
+        file_resolved(
+            &store,
+            project_pick.id,
+            guess.id,
+            Some(&destination(other.id, None)),
+        )
+        .unwrap();
+        let filed = store.get_capture(project_pick.id).unwrap();
+        assert_eq!(filed.project_id, Some(other.id));
+        assert_eq!(filed.filed_confidence.as_deref(), Some("certain"));
+        assert_eq!(filed.branch, None);
+
+        let stream_pick = store.capture("y", None).unwrap();
+        file_resolved(
+            &store,
+            stream_pick.id,
+            guess.id,
+            Some(&destination(other.id, Some("refunds"))),
+        )
+        .unwrap();
+        let filed = store.get_capture(stream_pick.id).unwrap();
+        assert_eq!(filed.filed_confidence.as_deref(), Some("certain"));
+        assert_eq!(filed.branch.as_deref(), Some("refunds"));
     }
 }
