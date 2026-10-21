@@ -18,10 +18,10 @@ magpie holds the work the user has chosen for agents in a short, ordered list ca
 Every item you take ends in exactly one of these:
 
 - `capture_done(id)` when the work is complete and you have checked it.
-- `capture_fail(id, reason)` when you cannot do it. The reason is shown to the user and the item goes back to the queue, so make it specific and actionable ("couldn't find src/auth.rs", not "failed").
-- `capture_handback(id, note)` when you made a real attempt but want a human to look before it counts as done. Explain why it needs a look; magpie computes the diff stat itself from what changed since you took the item, so don't describe the diff.
+- `capture_fail(id, reason)` when you cannot do it. This is the only way to put an item back: it releases the lease, records the item as failed with your reason, and makes it takeable again. The reason is shown to the user, so make it specific and actionable ("couldn't find src/auth.rs", not "failed"). Do not use it for work that is finished but needs checking.
+- `capture_handback(id, note)` when you finished a real attempt but a human needs to look before it counts as done. The item stays in Now, leaves the takeable pool, and waits for them. Explain why it needs a look; magpie computes the diff stat itself from what changed since you took the item, so don't describe the diff.
 
-Do not leave a taken item hanging: if you are about to stop for any reason, release or hand it back first.
+Do not leave a taken item hanging: if you are about to stop for any reason, call `capture_fail` with the reason, or `capture_handback` if it is done and needs a human.
 
 ## Writing things down
 
