@@ -3,8 +3,8 @@
 // project alongside up to nine others (by recency), each bound to a digit
 // held down with the capture hotkey's own modifiers. Releasing the hotkey
 // resolves whichever one is currently selected via `Store::file_capture`.
-// With starling installed, its open streams are listed under their project
-// as further destinations (see `build_candidates`).
+// With starling installed, its open streams are listed after every project,
+// in whatever digit slots the projects leave free (see `build_candidates`).
 //
 // This has to be a real window, not an in-webview overlay: it must show
 // over whatever app the user is in, and the main window may not even be
@@ -205,35 +205,29 @@ pub fn arm(app: &AppHandle, capture_id: i64) {
     });
 }
 
-/// Projects in recency order (the first is the toast's guess, so the
-/// default pick never moves), each followed by its open streams, capped at
-/// the ten digit slots. A stream sits under its own project so reaching it
-/// is "that project's digit plus one".
+/// Projects in recency order, exactly as they were before starling existed
+/// (the first is the toast's guess), then any open streams in the digit slots
+/// that are left. A project's digit therefore never depends on whether
+/// starling is installed or how many streams it has; only the free slots
+/// (none, once there are ten projects) fill with streams.
 fn build_candidates(
     projects: Vec<magpie_core::Project>,
     streams: &[StreamDestination],
 ) -> Vec<Destination> {
+    let projects = projects.into_iter().map(|p| Destination {
+        project_id: p.id,
+        project_name: p.name,
+        stream: None,
+        branch: None,
+    });
+    let streams = streams.iter().map(|s| Destination {
+        project_id: s.project_id,
+        project_name: s.project_name.clone(),
+        stream: Some(s.stream.clone()),
+        branch: s.branch.clone(),
+    });
     projects
-        .into_iter()
-        .flat_map(|p| {
-            let own_streams = streams
-                .iter()
-                .filter(|s| s.project_id == p.id)
-                .map(|s| Destination {
-                    project_id: s.project_id,
-                    project_name: s.project_name.clone(),
-                    stream: Some(s.stream.clone()),
-                    branch: s.branch.clone(),
-                })
-                .collect::<Vec<_>>();
-            std::iter::once(Destination {
-                project_id: p.id,
-                project_name: p.name,
-                stream: None,
-                branch: None,
-            })
-            .chain(own_streams)
-        })
+        .chain(streams)
         .take(MAX_CANDIDATES as usize)
         .collect()
 }
@@ -371,6 +365,15 @@ mod tests {
         }
     }
 
+    fn digits_of(candidates: &[Destination]) -> Vec<(i64, usize)> {
+        candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| d.stream.is_none())
+            .map(|(i, d)| (d.project_id, i))
+            .collect()
+    }
+
     #[test]
     fn without_streams_the_candidates_are_just_the_projects() {
         let got = build_candidates(vec![project(1, "a"), project(2, "b")], &[]);
@@ -380,34 +383,51 @@ mod tests {
     }
 
     #[test]
-    fn a_stream_sits_under_its_project_and_the_guess_stays_first() {
-        let got = build_candidates(
-            vec![project(1, "a"), project(2, "b")],
+    fn streams_follow_every_project_and_no_project_changes_digit() {
+        let projects = || vec![project(1, "a"), project(2, "b"), project(3, "c")];
+        let without = build_candidates(projects(), &[]);
+        let with = build_candidates(
+            projects(),
             &[
                 stream(2, "billing-retry", Some("refunds")),
                 stream(1, "x", None),
             ],
         );
-        let rows: Vec<_> = got
+
+        assert_eq!(
+            digits_of(&with),
+            digits_of(&without),
+            "projects keep their digits"
+        );
+        let tail: Vec<_> = with[3..]
             .iter()
             .map(|d| (d.project_id, d.stream.as_deref(), d.branch.as_deref()))
             .collect();
         assert_eq!(
-            rows,
+            tail,
             [
-                (1, None, None),
-                (1, Some("x"), None),
-                (2, None, None),
                 (2, Some("billing-retry"), Some("refunds")),
+                (1, Some("x"), None)
             ]
         );
     }
 
     #[test]
-    fn candidates_stop_at_the_ten_digit_slots() {
-        let projects = (1..=10).map(|i| project(i, "p")).collect();
-        let streams: Vec<_> = (1..=10).map(|i| stream(i, "s", None)).collect();
-        assert_eq!(build_candidates(projects, &streams).len(), 10);
+    fn streams_never_displace_projects_when_the_slots_run_out() {
+        let projects = || (1..=9).map(|i| project(i, "p")).collect::<Vec<_>>();
+        let streams: Vec<_> = (1..=5).map(|i| stream(i, "s", None)).collect();
+
+        let got = build_candidates(projects(), &streams);
+
+        assert_eq!(got.len(), 10, "one free slot, one stream");
+        assert_eq!(
+            digits_of(&got),
+            digits_of(&build_candidates(projects(), &[]))
+        );
+        let ten: Vec<_> = (1..=10).map(|i| project(i, "p")).collect();
+        assert!(build_candidates(ten, &streams)
+            .iter()
+            .all(|d| d.stream.is_none()));
     }
 
     #[test]
