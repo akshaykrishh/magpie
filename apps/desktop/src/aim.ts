@@ -12,8 +12,16 @@ const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 
 if (inTauri) void initThemeSync();
 
-// Mirrors src-tauri/src/aim.rs's `AimCandidate` exactly.
-type AimCandidate = { project_id: number; project_name: string; digit: string };
+// Mirrors src-tauri/src/aim.rs's `AimCandidate` exactly. `stream` is set
+// only for a starling stream row (a project plus, when the stream is not on
+// the default branch, `branch`).
+type AimCandidate = {
+  project_id: number;
+  project_name: string;
+  stream: string | null;
+  branch: string | null;
+  digit: string;
+};
 type AimShowPayload = { candidates: AimCandidate[]; selected_index: number };
 type AimSelectPayload = { selected_index: number };
 
@@ -35,6 +43,12 @@ function render(payload: AimShowPayload) {
     name.className = "name";
     name.textContent = c.project_name;
     row.append(kbd, name);
+    if (c.stream) {
+      const stream = document.createElement("span");
+      stream.className = "stream";
+      stream.textContent = c.branch ? `${c.stream} · ${c.branch}` : c.stream;
+      row.append(stream);
+    }
     list.appendChild(row);
     return row;
   });

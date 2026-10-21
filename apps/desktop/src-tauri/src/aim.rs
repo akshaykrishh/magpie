@@ -3,6 +3,8 @@
 // project alongside up to nine others (by recency), each bound to a digit
 // held down with the capture hotkey's own modifiers. Releasing the hotkey
 // resolves whichever one is currently selected via `Store::file_capture`.
+// With starling installed, its open streams are listed under their project
+// as further destinations (see `build_candidates`).
 //
 // This has to be a real window, not an in-webview overlay: it must show
 // over whatever app the user is in, and the main window may not even be
@@ -23,8 +25,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
 
 use crate::panels;
+use crate::starling::StreamDestination;
 use crate::state::AppState;
-use crate::toast::GuessedDestination;
 use crate::HotkeyRuntime;
 
 pub const AIM_LABEL: &str = "aim";
@@ -39,10 +41,26 @@ const MAX_CANDIDATES: i64 = 10;
 /// timeout; nobody holds a hotkey down for ten real seconds on purpose.
 const WATCHDOG: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// One row the hold-to-aim picker can land on: a project, or -- when
+/// starling is installed -- one of its open streams, which is a project
+/// plus the branch the item should be pinned to.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Destination {
+    pub project_id: i64,
+    pub project_name: String,
+    pub stream: Option<String>,
+    /// Only ever set for a stream on a non-default branch.
+    pub branch: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct AimCandidate {
     pub project_id: i64,
     pub project_name: String,
+    /// The stream's name, for a stream row; the webview shows it after the
+    /// project name.
+    pub stream: Option<String>,
+    pub branch: Option<String>,
     /// The literal digit ("1".."9", then "0") this candidate is bound to --
     /// the aim webview renders this next to each row rather than
     /// re-deriving index-to-digit itself.
@@ -65,7 +83,7 @@ struct AimSelectPayload {
 /// `state::PendingGuess`.
 pub struct AimSession {
     capture_id: i64,
-    candidates: Vec<GuessedDestination>,
+    candidates: Vec<Destination>,
     selected_index: usize,
 }
 
@@ -123,20 +141,17 @@ fn digit_shortcuts(app: &AppHandle) -> Vec<Shortcut> {
 /// only exists at ≥2 destinations.
 pub fn arm(app: &AppHandle, capture_id: i64) {
     let state = app.state::<AppState>();
-    let candidates: Vec<GuessedDestination> =
-        match state.store.list_projects_by_recency(MAX_CANDIDATES) {
-            Ok(projects) => projects
-                .into_iter()
-                .map(|p| GuessedDestination {
-                    project_id: p.id,
-                    project_name: p.name,
-                })
-                .collect(),
-            Err(e) => {
-                eprintln!("magpie: aim candidate lookup failed: {e}");
-                return;
-            }
-        };
+    let projects = match state.store.list_projects_by_recency(MAX_CANDIDATES) {
+        Ok(projects) => projects,
+        Err(e) => {
+            eprintln!("magpie: aim candidate lookup failed: {e}");
+            return;
+        }
+    };
+    // From the last snapshot in memory -- never a call to starling here,
+    // this runs on the timer thread while the hotkey is held.
+    let streams = state.starling.stream_destinations(&state.store);
+    let candidates = build_candidates(projects, &streams);
     if candidates.len() < 2 {
         return;
     }
@@ -190,13 +205,48 @@ pub fn arm(app: &AppHandle, capture_id: i64) {
     });
 }
 
-fn label_candidates(candidates: &[GuessedDestination]) -> Vec<AimCandidate> {
+/// Projects in recency order (the first is the toast's guess, so the
+/// default pick never moves), each followed by its open streams, capped at
+/// the ten digit slots. A stream sits under its own project so reaching it
+/// is "that project's digit plus one".
+fn build_candidates(
+    projects: Vec<magpie_core::Project>,
+    streams: &[StreamDestination],
+) -> Vec<Destination> {
+    projects
+        .into_iter()
+        .flat_map(|p| {
+            let own_streams = streams
+                .iter()
+                .filter(|s| s.project_id == p.id)
+                .map(|s| Destination {
+                    project_id: s.project_id,
+                    project_name: s.project_name.clone(),
+                    stream: Some(s.stream.clone()),
+                    branch: s.branch.clone(),
+                })
+                .collect::<Vec<_>>();
+            std::iter::once(Destination {
+                project_id: p.id,
+                project_name: p.name,
+                stream: None,
+                branch: None,
+            })
+            .chain(own_streams)
+        })
+        .take(MAX_CANDIDATES as usize)
+        .collect()
+}
+
+fn label_candidates(candidates: &[Destination]) -> Vec<AimCandidate> {
     candidates
         .iter()
         .enumerate()
         .map(|(i, d)| AimCandidate {
             project_id: d.project_id,
             project_name: d.project_name.clone(),
+            stream: d.stream.clone(),
+            branch: d.branch.clone(),
             digit: digit_for_index(i),
         })
         .collect()
@@ -235,11 +285,11 @@ fn on_digit_pressed(app: &AppHandle, shortcut: &Shortcut) {
 /// unregistering its digit shortcuts and hiding the panel either way --
 /// called once from `capture_flow::on_capture_hotkey_released` regardless
 /// of how the hold-vs-tap timing played out, since this is the only place
-/// that knows whether a gesture actually took over. Returns the project
-/// the gesture landed on, or `None` if no gesture was live (a tap, or a
-/// hold with too few destinations to aim at) -- the caller falls back to
-/// the original guess in that case.
-pub fn resolve_if_active(app: &AppHandle, capture_id: i64) -> Option<i64> {
+/// that knows whether a gesture actually took over. Returns the
+/// destination the gesture landed on, or `None` if no gesture was live (a
+/// tap, or a hold with too few destinations to aim at) -- the caller falls
+/// back to the original guess in that case.
+pub fn resolve_if_active(app: &AppHandle, capture_id: i64) -> Option<Destination> {
     let state = app.state::<AppState>();
     let session = {
         let mut guard = state
@@ -253,7 +303,7 @@ pub fn resolve_if_active(app: &AppHandle, capture_id: i64) -> Option<i64> {
     }?;
 
     dismiss(app);
-    Some(session.candidates[session.selected_index].project_id)
+    session.candidates.get(session.selected_index).cloned()
 }
 
 /// The watchdog's own resolution path: force-dismisses a gesture that's
@@ -300,6 +350,65 @@ pub fn init_aim_panel(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn project(id: i64, name: &str) -> magpie_core::Project {
+        magpie_core::Project {
+            id,
+            name: name.to_string(),
+            remote_url: None,
+            common_git_dir: None,
+            created_at: String::new(),
+            last_active_at: None,
+        }
+    }
+
+    fn stream(project_id: i64, name: &str, branch: Option<&str>) -> StreamDestination {
+        StreamDestination {
+            project_id,
+            project_name: format!("p{project_id}"),
+            stream: name.to_string(),
+            branch: branch.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn without_streams_the_candidates_are_just_the_projects() {
+        let got = build_candidates(vec![project(1, "a"), project(2, "b")], &[]);
+        let names: Vec<_> = got.iter().map(|d| d.project_name.as_str()).collect();
+        assert_eq!(names, ["a", "b"]);
+        assert!(got.iter().all(|d| d.stream.is_none() && d.branch.is_none()));
+    }
+
+    #[test]
+    fn a_stream_sits_under_its_project_and_the_guess_stays_first() {
+        let got = build_candidates(
+            vec![project(1, "a"), project(2, "b")],
+            &[
+                stream(2, "billing-retry", Some("refunds")),
+                stream(1, "x", None),
+            ],
+        );
+        let rows: Vec<_> = got
+            .iter()
+            .map(|d| (d.project_id, d.stream.as_deref(), d.branch.as_deref()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (1, None, None),
+                (1, Some("x"), None),
+                (2, None, None),
+                (2, Some("billing-retry"), Some("refunds")),
+            ]
+        );
+    }
+
+    #[test]
+    fn candidates_stop_at_the_ten_digit_slots() {
+        let projects = (1..=10).map(|i| project(i, "p")).collect();
+        let streams: Vec<_> = (1..=10).map(|i| stream(i, "s", None)).collect();
+        assert_eq!(build_candidates(projects, &streams).len(), 10);
+    }
 
     #[test]
     fn digit_for_index_runs_one_through_nine_then_zero() {

@@ -82,3 +82,18 @@ body {
 .row.selected .name {
   color: var(--mp-fg);
 }
+
+/* A starling stream's row: the project name, then the stream (and branch)
+   in the same mono label voice as the digit, quieter than the name. */
+.stream {
+  min-width: 0;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--mp-fg-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row.selected .stream {
+  color: var(--mp-accent);
+}

@@ -64,6 +64,11 @@ pub fn on_capture_hotkey(app: &AppHandle) {
         .lock()
         .expect("pending_guess mutex poisoned") = None;
 
+    // Warms starling's snapshot for the aim picker (a no-op while it is
+    // fresh or starling is absent) -- by the time a hold becomes an aim,
+    // the streams are already in memory.
+    state.starling.touch(app);
+
     let text = match state.backend.read_capture_text() {
         Ok(Some(t)) => t,
         Ok(None) => {
@@ -339,8 +344,8 @@ pub fn on_capture_hotkey_released(app: &AppHandle) {
         return;
     };
 
-    let project_id =
-        crate::aim::resolve_if_active(app, pending.capture_id).unwrap_or(pending.project_id);
+    let aimed = crate::aim::resolve_if_active(app, pending.capture_id);
+    let project_id = aimed.as_ref().map_or(pending.project_id, |d| d.project_id);
 
     if let Err(e) = state
         .store
@@ -348,6 +353,13 @@ pub fn on_capture_hotkey_released(app: &AppHandle) {
     {
         eprintln!("magpie: failed to confirm guessed project: {e}");
         return;
+    }
+    // Aiming at a starling stream on a non-default branch also pins the
+    // item to that branch, the way a stream is (project + branch).
+    if let Some(branch) = aimed.as_ref().and_then(|d| d.branch.as_deref()) {
+        if let Err(e) = state.store.pin_to_branch(pending.capture_id, Some(branch)) {
+            eprintln!("magpie: failed to pin capture to the stream's branch: {e}");
+        }
     }
     let _ = app.emit("capture:updated", pending.capture_id);
 }
