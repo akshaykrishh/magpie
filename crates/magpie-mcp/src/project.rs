@@ -22,6 +22,18 @@ pub fn detect() -> DetectedProject {
 /// how `magpie now --project <dir>` resolves a folder to a project exactly
 /// the way the MCP server resolves its own spawn directory.
 pub fn detect_in(dir: Option<&Path>) -> DetectedProject {
+    detect_in_with(dir, &git)
+}
+
+/// Runs `git <args>` in a directory and returns its trimmed stdout, or
+/// `None` on any failure. `detect_in` uses a plain blocking one; a caller
+/// that must bound how long git may take (the desktop app, on a background
+/// thread) passes its own.
+pub type GitRunner<'a> = dyn Fn(Option<&Path>, &[&str]) -> Option<String> + 'a;
+
+/// `detect_in` with the way git is run supplied by the caller -- same
+/// identity logic, so a folder resolves identically however it is run.
+pub fn detect_in_with(dir: Option<&Path>, git: &GitRunner) -> DetectedProject {
     let remote_url = git(dir, &["remote", "get-url", "origin"]);
     // `--git-common-dir` on git < 2.31 returns a path relative to the
     // current directory rather than absolute (the `--path-format` flag

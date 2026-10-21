@@ -128,11 +128,13 @@ impl Starling {
         let this = Arc::clone(self);
         let app = app.clone();
         std::thread::spawn(move || {
+            // Cleared however this ends, a panic included: a refresh that
+            // never reset the flag would silence starling until restart.
+            let _guard = RefreshGuard(Arc::clone(&this));
             let state = app.state::<AppState>();
             if this.refresh(&Locator::from_process(), &state.store) {
                 let _ = app.emit(CHANGED_EVENT, ());
             }
-            this.refreshing.store(false, Ordering::SeqCst);
         });
     }
 
@@ -298,6 +300,15 @@ impl Starling {
             Some(snapshot) => stream_destinations(&snapshot, &project_lookup(store)),
             None => Vec::new(),
         }
+    }
+}
+
+/// Clears `Starling::refreshing` when dropped.
+struct RefreshGuard(Arc<Starling>);
+
+impl Drop for RefreshGuard {
+    fn drop(&mut self) {
+        self.0.refreshing.store(false, Ordering::SeqCst);
     }
 }
 
@@ -565,6 +576,21 @@ mod tests {
             "a change the windows must hear about"
         );
         assert!(!starling.agents(&store).present);
+    }
+
+    #[test]
+    fn the_refreshing_flag_is_cleared_even_when_a_refresh_panics() {
+        let starling = Arc::new(Starling::new());
+        starling.refreshing.store(true, Ordering::SeqCst);
+        let held = Arc::clone(&starling);
+
+        let outcome = std::panic::catch_unwind(move || {
+            let _guard = RefreshGuard(held);
+            panic!("refresh blew up");
+        });
+
+        assert!(outcome.is_err());
+        assert!(!starling.refreshing.load(Ordering::SeqCst));
     }
 
     #[test]

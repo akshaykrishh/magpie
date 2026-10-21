@@ -32,13 +32,22 @@ fn spawn(command: &mut Command) -> Option<Child> {
             Err(e) if e.kind() == ErrorKind::ExecutableFileBusy => {
                 std::thread::sleep(Duration::from_millis(20));
             }
-            Err(e) => {
-                eprintln!("SPAWN ERR {e:?}");
-                return None;
-            }
+            Err(_) => return None,
         }
     }
     None
+}
+
+/// Kills the child and, on unix, everything in its process group.
+fn kill_tree(child: &mut Child) {
+    #[cfg(unix)]
+    // SAFETY: killpg only sends a signal to the group this child leads (it
+    // was started with `process_group(0)`, so the group id is its pid).
+    unsafe {
+        libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Runs `command` with no stdin and no stderr, returning its stdout if it
@@ -56,6 +65,11 @@ pub fn run(mut command: Command, timeout: Duration) -> Option<Captured> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    // Its own process group, so a timeout can take down what it started too:
+    // a login shell or a node wrapper leaves children that would otherwise
+    // keep the pipe open and keep running.
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
     let mut child = spawn(&mut command)?;
     let stdout = child.stdout.take()?;
 
@@ -83,8 +97,7 @@ pub fn run(mut command: Command, timeout: Duration) -> Option<Captured> {
                 std::thread::sleep(Duration::from_millis(5));
             }
             _ => {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill_tree(&mut child);
                 return None;
             }
         }
@@ -100,4 +113,47 @@ pub fn run(mut command: Command, timeout: Duration) -> Option<Captured> {
         success,
         stdout: String::from_utf8(buf).ok()?,
     })
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::starling::testing::{script, TempDir};
+
+    fn alive(pid: i32) -> bool {
+        // SAFETY: signal 0 only checks that the process exists.
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    #[test]
+    fn a_timeout_takes_the_whole_process_group_with_it() {
+        let tmp = TempDir::new();
+        // Like a login shell or node wrapper: starts a child, then waits.
+        let bin = script(
+            &tmp.join("wrapper"),
+            &format!(
+                "sleep 60 &\necho $! > \"{}/grandchild\"\nwait",
+                tmp.path().display()
+            ),
+        );
+
+        let started = Instant::now();
+        assert!(run(Command::new(&bin), Duration::from_secs(5)).is_none());
+        assert!(started.elapsed() < Duration::from_secs(20));
+
+        let pid: i32 = std::fs::read_to_string(tmp.join("grandchild"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let mut gone = false;
+        for _ in 0..50 {
+            if !alive(pid) {
+                gone = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(gone, "the grandchild was left running");
+    }
 }

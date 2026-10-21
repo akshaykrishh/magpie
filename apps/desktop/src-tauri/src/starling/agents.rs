@@ -7,14 +7,17 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::process::Command;
+use std::time::Duration;
 
 use magpie_core::{ProjectOverview, Session, Store};
 use serde::Serialize;
 
 use super::contract::{SessionState, StarlingSession};
+use super::run::{self, CALL_TIMEOUT};
 
-/// Where a folder sits in git, resolved once per refresh on a background
-/// thread (it shells out to git) and then reused: the identity magpie
+/// Where a folder sits in git, resolved on a background thread (it shells
+/// out to git) and then reused: the identity magpie
 /// files projects under, plus the checked-out branch.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Place {
@@ -24,11 +27,26 @@ pub struct Place {
 }
 
 impl Place {
+    /// Resolved with git under `CALL_TIMEOUT` per call: a hung git must not
+    /// stall the refresh that asked.
     pub fn of(dir: &Path) -> Self {
+        Self::of_with(dir, Path::new("git"), CALL_TIMEOUT)
+    }
+
+    pub(super) fn of_with(dir: &Path, git: &Path, timeout: Duration) -> Self {
         if !dir.is_dir() {
             return Self::default();
         }
-        let detected = magpie_mcp::detect_in(Some(dir));
+        let detected = magpie_mcp::detect_in_with(Some(dir), &|cwd, args| {
+            let mut command = Command::new(git);
+            if let Some(cwd) = cwd {
+                command.current_dir(cwd);
+            }
+            command.args(args);
+            let out = run::run(command, timeout).filter(|o| o.success)?;
+            let text = out.stdout.trim();
+            (!text.is_empty()).then(|| text.to_string())
+        });
         Self {
             remote_url: detected.remote_url,
             common_git_dir: detected.common_git_dir,
@@ -601,6 +619,38 @@ mod tests {
             [(7, "stream/shop", Some("refunds")), (8, "stream/api", None)]
         );
         assert_eq!(got[0].project_name, "shop");
+    }
+
+    #[test]
+    fn a_hung_git_gives_an_empty_place_after_the_timeout() {
+        use crate::starling::testing::{script, TempDir};
+        let tmp = TempDir::new();
+        let git = script(&tmp.join("git"), "exec sleep 60");
+
+        let started = std::time::Instant::now();
+        let place = Place::of_with(tmp.path(), &git, Duration::from_millis(300));
+
+        assert_eq!(place, Place::default());
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "bounded, not stuck"
+        );
+    }
+
+    #[test]
+    fn a_place_is_read_from_git_output() {
+        use crate::starling::testing::{script, TempDir};
+        let tmp = TempDir::new();
+        let git = script(
+            &tmp.join("git"),
+            "case \"$1\" in remote) echo git@github.com:acme/shop-api.git;; rev-parse) case \"$2\" in --git-common-dir) echo /repos/shop-api/.git;; *) echo refunds;; esac;; esac",
+        );
+        let place = Place::of_with(tmp.path(), &git, Duration::from_secs(20));
+        assert_eq!(
+            place.remote_url.as_deref(),
+            Some("git@github.com:acme/shop-api.git")
+        );
+        assert_eq!(place.branch.as_deref(), Some("refunds"));
     }
 
     #[test]
