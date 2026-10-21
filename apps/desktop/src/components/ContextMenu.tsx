@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { popupMenu, type ContextMenuItem } from "@/lib/nativeMenu";
 
@@ -15,11 +16,15 @@ interface ContextMenuProps {
 /// a component so each call site's items and ref stay declared where they
 /// were.
 export function ContextMenu({ items, openRef }: ContextMenuProps) {
-  if (openRef) {
+  // Wired after render, not during it, so render stays pure. Runs on every
+  // commit (no deps) so the opener always sees the latest `items`; a menu
+  // can only be opened from an event, which fires after the effect.
+  useEffect(() => {
+    if (!openRef) return;
     openRef.current = (x, y) => {
       popupMenu(items, { x, y }).catch(console.error);
     };
-  }
+  });
   return null;
 }
 
