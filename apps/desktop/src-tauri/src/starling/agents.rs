@@ -55,6 +55,32 @@ impl Place {
     }
 }
 
+impl Place {
+    /// The branch checked out in `dir` right now, read fresh (one bounded
+    /// git call) rather than from the cached `Place`. `None` when git could
+    /// not answer; `Some(None)` when it answered and HEAD is detached.
+    pub fn current_branch(dir: &Path) -> Option<Option<String>> {
+        Self::current_branch_with(dir, Path::new("git"), CALL_TIMEOUT)
+    }
+
+    pub(super) fn current_branch_with(
+        dir: &Path,
+        git: &Path,
+        timeout: Duration,
+    ) -> Option<Option<String>> {
+        if !dir.is_dir() {
+            return None;
+        }
+        let mut command = Command::new(git);
+        command
+            .current_dir(dir)
+            .args(["rev-parse", "--abbrev-ref", "HEAD"]);
+        let out = run::run(command, timeout).filter(|o| o.success)?;
+        let name = out.stdout.trim();
+        Some((!name.is_empty() && name != "HEAD").then(|| name.to_string()))
+    }
+}
+
 /// An open starling stream, with the facts needed to offer it as a filing
 /// destination. `default_branch` is `None` when git could not say.
 #[derive(Debug, Clone, PartialEq)]
@@ -129,6 +155,11 @@ pub struct StreamDestination {
     pub project_name: String,
     pub stream: String,
     pub branch: Option<String>,
+    /// The stream's folder and its project's default branch, kept so the
+    /// branch can be read again at the moment a stream is chosen (the
+    /// cached `branch` can be a minute old).
+    pub cwd: String,
+    pub default_branch: Option<String>,
 }
 
 pub type ProjectLookup<'a> = dyn Fn(&Place) -> Option<(i64, String)> + 'a;
@@ -270,15 +301,12 @@ pub fn augment_overview(
 /// The branch to pin an item to when filing to a stream: the stream's
 /// checked-out branch, unless that is the project's default (an item for
 /// the default branch is just a project item, and pinning it would hide it
-/// from sessions on other branches). With no answer from git about the
-/// default, `main` and `master` stand in for it.
+/// from sessions on other branches). When the default is not known, nothing
+/// is pinned: guessing could pin an item to the repo's own default branch.
 pub fn branch_constraint(branch: Option<&str>, default_branch: Option<&str>) -> Option<String> {
     let branch = branch.filter(|b| !b.is_empty())?;
-    let is_default = match default_branch {
-        Some(default) => branch == default,
-        None => matches!(branch, "main" | "master"),
-    };
-    (!is_default).then(|| branch.to_string())
+    let default = default_branch.filter(|d| !d.is_empty())?;
+    (branch != default).then(|| branch.to_string())
 }
 
 /// Open streams whose folder is a known magpie project, in starling's
@@ -301,20 +329,40 @@ pub fn stream_destinations(
                     place.branch.as_deref(),
                     stream.default_branch.as_deref(),
                 ),
+                cwd: stream.cwd.clone(),
+                default_branch: stream.default_branch.clone(),
             })
         })
         .collect()
 }
 
-/// `ps -o pid=,ppid=` output as pid -> parent pid. Lines that are not two
-/// numbers (a header, noise) are skipped.
+/// Whether a `ps -o comm=` value names magpie's own binary: the MCP
+/// server is `magpie serve-mcp` (or the `magpie-mcp` binary). macOS prints
+/// the full path, Linux the bare name, so only the last component counts.
+fn is_magpie_command(comm: &str) -> bool {
+    let name = comm.trim().rsplit('/').next().unwrap_or("");
+    matches!(name, "magpie" | "magpie-mcp")
+}
+
+/// The first whitespace-separated field of `text` and everything after it.
+fn split_field(text: &str) -> Option<(&str, &str)> {
+    let text = text.trim_start();
+    let end = text.find(char::is_whitespace)?;
+    Some((&text[..end], text[end..].trim()))
+}
+
+/// `ps -o pid=,ppid=,comm=` output as pid -> parent pid, for the processes
+/// that really are magpie's MCP server. A session's pid can be reused after
+/// its server dies; if it now belongs to some other child of a live
+/// `claude` (a bash tool, say), taking its parent would credit that agent
+/// with a session that is not running. Lines that are not two numbers and
+/// a command (a header, noise) are skipped too.
 pub fn parse_ps_parents(text: &str) -> HashMap<i64, i64> {
     text.lines()
         .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            let pid = fields.next()?.parse().ok()?;
-            let ppid = fields.next()?.parse().ok()?;
-            fields.next().is_none().then_some((pid, ppid))
+            let (pid, rest) = split_field(line)?;
+            let (ppid, comm) = split_field(rest)?;
+            is_magpie_command(comm).then_some((pid.parse().ok()?, ppid.parse().ok()?))
         })
         .collect()
 }
@@ -614,13 +662,11 @@ mod tests {
             branch_constraint(Some("main"), Some("trunk")).as_deref(),
             Some("main")
         );
-        // git could not name a default: main and master stand in for it.
+        // Default unknown: pin nothing rather than guess.
         assert_eq!(branch_constraint(Some("main"), None), None);
-        assert_eq!(branch_constraint(Some("master"), None), None);
-        assert_eq!(
-            branch_constraint(Some("refunds"), None).as_deref(),
-            Some("refunds")
-        );
+        assert_eq!(branch_constraint(Some("develop"), None), None);
+        assert_eq!(branch_constraint(Some("refunds"), None), None);
+        assert_eq!(branch_constraint(Some("refunds"), Some("")), None);
         // Detached or unknown branch: nothing to pin to.
         assert_eq!(branch_constraint(None, Some("main")), None);
         assert_eq!(branch_constraint(Some(""), Some("main")), None);
@@ -687,8 +733,51 @@ mod tests {
 
     #[test]
     fn ps_output_is_read_as_pid_and_parent() {
-        let parsed = parse_ps_parents("  5151  4242\n 9 1\nPID PPID\nnoise\n 7 8 9\n");
+        let parsed = parse_ps_parents(
+            "  5151  4242 magpie\n 9 1 /usr/local/bin/magpie-mcp\nPID PPID COMMAND\nnoise\n 7 8\n",
+        );
         assert_eq!(parsed, HashMap::from([(5151, 4242), (9, 1)]));
         assert!(parse_ps_parents("").is_empty());
+    }
+
+    #[test]
+    fn a_reused_pid_that_is_not_magpie_is_not_matched() {
+        // 6000 was a magpie MCP server; its pid now belongs to a bash tool
+        // under the same live claude (4242). 5151 really is magpie.
+        let parsed = parse_ps_parents(
+            "  6000  4242 /bin/bash\n  5151  4242 /Users/me/Applications/Magpie App/magpie\n  6001  4242 sleep\n",
+        );
+        assert_eq!(parsed, HashMap::from([(5151, 4242)]));
+
+        // And through compose: the stale session finds no agent.
+        let snap = snapshot(
+            vec![starling("s1", Some(4242), "/shop", SessionState::Waiting)],
+            &parsed.into_iter().collect::<Vec<_>>(),
+        );
+        let rows = compose(&snap, &[magpie("stale", 6000, Some(7))], &lookup);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].magpie_session, None, "the bash tool is not magpie");
+    }
+
+    #[test]
+    fn magpie_is_recognised_by_its_binary_name_only() {
+        for yes in [
+            "magpie",
+            "/usr/local/bin/magpie",
+            "magpie-mcp",
+            " /a b/magpie ",
+        ] {
+            assert!(is_magpie_command(yes), "{yes}");
+        }
+        for no in [
+            "",
+            "bash",
+            "/bin/bash",
+            "magpie-helper",
+            "/magpie/bash",
+            "claude",
+        ] {
+            assert!(!is_magpie_command(no), "{no}");
+        }
     }
 }

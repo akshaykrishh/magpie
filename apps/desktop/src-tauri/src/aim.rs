@@ -51,6 +51,9 @@ pub struct Destination {
     pub stream: Option<String>,
     /// Only ever set for a stream on a non-default branch.
     pub branch: Option<String>,
+    /// A stream's folder and its project's default branch, so the branch can
+    /// be read again when the stream is picked (`refresh_branch`).
+    pub stream_dir: Option<(String, Option<String>)>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -219,12 +222,14 @@ fn build_candidates(
         project_name: p.name,
         stream: None,
         branch: None,
+        stream_dir: None,
     });
     let streams = streams.iter().map(|s| Destination {
         project_id: s.project_id,
         project_name: s.project_name.clone(),
         stream: Some(s.stream.clone()),
         branch: s.branch.clone(),
+        stream_dir: Some((s.cwd.clone(), s.default_branch.clone())),
     });
     projects
         .chain(streams)
@@ -297,7 +302,30 @@ pub fn resolve_if_active(app: &AppHandle, capture_id: i64) -> Option<Destination
     }?;
 
     dismiss(app);
-    session.candidates.get(session.selected_index).cloned()
+    session
+        .candidates
+        .get(session.selected_index)
+        .cloned()
+        .map(|d| refresh_branch(d, &|dir| crate::starling::current_branch(dir)))
+}
+
+/// A stream's branch as of now. The one cached in the snapshot can be a
+/// minute old, and a capture filed after the stream moved to another branch
+/// would be pinned to the old one. `read` is one bounded git call: `None`
+/// when git could not answer (the cached branch stands), `Some(None)` for a
+/// detached HEAD. Projects, which carry no stream folder, are untouched.
+fn refresh_branch(
+    mut destination: Destination,
+    read: &dyn Fn(&std::path::Path) -> Option<Option<String>>,
+) -> Destination {
+    let Some((dir, default_branch)) = &destination.stream_dir else {
+        return destination;
+    };
+    if let Some(current) = read(std::path::Path::new(dir)) {
+        destination.branch =
+            crate::starling::branch_constraint(current.as_deref(), default_branch.as_deref());
+    }
+    destination
 }
 
 /// The watchdog's own resolution path: force-dismisses a gesture that's
@@ -362,6 +390,8 @@ mod tests {
             project_name: format!("p{project_id}"),
             stream: name.to_string(),
             branch: branch.map(str::to_string),
+            cwd: format!("/work/{name}"),
+            default_branch: Some("main".to_string()),
         }
     }
 
@@ -434,5 +464,47 @@ mod tests {
     fn digit_for_index_runs_one_through_nine_then_zero() {
         let digits: String = (0..10).map(digit_for_index).collect();
         assert_eq!(digits, "1234567890");
+    }
+
+    fn aimed_at(stream: StreamDestination) -> Destination {
+        build_candidates(vec![], &[stream]).remove(0)
+    }
+
+    #[test]
+    fn the_branch_is_read_again_when_a_stream_is_picked() {
+        // Cached as `refunds`, but the stream has since moved to `billing`.
+        let picked = aimed_at(stream(1, "s", Some("refunds")));
+        let read = |dir: &std::path::Path| {
+            assert_eq!(dir, std::path::Path::new("/work/s"));
+            Some(Some("billing".to_string()))
+        };
+        assert_eq!(
+            refresh_branch(picked, &read).branch.as_deref(),
+            Some("billing")
+        );
+    }
+
+    #[test]
+    fn a_stream_that_returned_to_the_default_branch_is_no_longer_pinned() {
+        let picked = aimed_at(stream(1, "s", Some("refunds")));
+        let read = |_: &std::path::Path| Some(Some("main".to_string()));
+        assert_eq!(refresh_branch(picked, &read).branch, None);
+        let picked = aimed_at(stream(1, "s", Some("refunds")));
+        let detached = |_: &std::path::Path| Some(None);
+        assert_eq!(refresh_branch(picked, &detached).branch, None);
+    }
+
+    #[test]
+    fn when_git_cannot_answer_the_cached_branch_stands_and_projects_are_untouched() {
+        let picked = aimed_at(stream(1, "s", Some("refunds")));
+        let down = |_: &std::path::Path| None;
+        assert_eq!(
+            refresh_branch(picked, &down).branch.as_deref(),
+            Some("refunds")
+        );
+
+        let project = build_candidates(vec![project(1, "a")], &[]).remove(0);
+        let must_not_run = |_: &std::path::Path| panic!("a project has no folder to read");
+        assert_eq!(refresh_branch(project, &must_not_run).branch, None);
     }
 }
