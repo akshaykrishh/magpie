@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::{LazyLock, Mutex};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use time::OffsetDateTime;
 
 use crate::error::Result;
@@ -146,6 +146,33 @@ impl Store {
         Ok(Self {
             conn: Mutex::new(conn),
         })
+    }
+
+    /// Opens an existing database for reading only, for callers that must
+    /// never leave a trace -- `Ok(None)` when no database exists yet, and no
+    /// directory, file, journal mode or migration is written in any case.
+    ///
+    /// A database whose schema is older than this build (a fresh upgrade
+    /// nobody has launched yet) is opened the ordinary way instead, which
+    /// migrates it exactly as every other command does: reading it as-is
+    /// would fail on missing columns.
+    pub fn open_read_only(path: impl AsRef<Path>) -> Result<Option<Self>> {
+        if !path.as_ref().exists() {
+            return Ok(None);
+        }
+        let conn = Connection::open_with_flags(
+            path.as_ref(),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if version < MIGRATIONS.len() as i64 {
+            drop(conn);
+            return Self::open(path).map(Some);
+        }
+        Ok(Some(Self {
+            conn: Mutex::new(conn),
+        }))
     }
 
     /// In-memory database for tests. Still runs the full migration path so

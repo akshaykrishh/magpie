@@ -35,7 +35,39 @@ pub(crate) fn touch_project_active_tx(
     Ok(())
 }
 
+/// The one place project identity is matched: the remote URL when there is
+/// one, otherwise the common git dir. A remote URL that matches nothing does
+/// not fall through to the git dir -- same rule `get_or_create_project` has
+/// always applied, now shared with the read-only lookup.
+fn find_project_tx(
+    conn: &rusqlite::Connection,
+    remote_url: Option<&str>,
+    common_git_dir: Option<&str>,
+) -> rusqlite::Result<Option<Project>> {
+    if let Some(remote_url) = remote_url {
+        let sql = format!("SELECT {PROJECT_COLUMNS} FROM projects WHERE remote_url = ?1");
+        conn.query_row(&sql, params![remote_url], project_from_row)
+            .optional()
+    } else if let Some(common_git_dir) = common_git_dir {
+        let sql = format!("SELECT {PROJECT_COLUMNS} FROM projects WHERE common_git_dir = ?1");
+        conn.query_row(&sql, params![common_git_dir], project_from_row)
+            .optional()
+    } else {
+        Ok(None)
+    }
+}
+
 impl Store {
+    /// Read-only counterpart of `get_or_create_project`: the project for
+    /// this identity if one exists, never creating (or touching) one.
+    pub fn find_project(
+        &self,
+        remote_url: Option<&str>,
+        common_git_dir: Option<&str>,
+    ) -> Result<Option<Project>> {
+        self.with_conn(|conn| Ok(find_project_tx(conn, remote_url, common_git_dir)?))
+    }
+
     /// Identity is the git remote URL, falling back to the common git dir --
     /// this is what unifies worktrees of the same repo into one project
     /// instead of fragmenting the backlog per checkout (see docs/design.md).
@@ -48,27 +80,10 @@ impl Store {
         common_git_dir: Option<&str>,
     ) -> Result<Project> {
         self.with_conn(|conn| {
-            if let Some(remote_url) = remote_url {
-                let sql = format!("SELECT {PROJECT_COLUMNS} FROM projects WHERE remote_url = ?1");
-                if let Some(p) = conn
-                    .query_row(&sql, params![remote_url], project_from_row)
-                    .optional()?
-                {
-                    touch_project_active_tx(conn, p.id)?;
-                    let sql = format!("SELECT {PROJECT_COLUMNS} FROM projects WHERE id = ?1");
-                    return Ok(conn.query_row(&sql, params![p.id], project_from_row)?);
-                }
-            } else if let Some(common_git_dir) = common_git_dir {
-                let sql =
-                    format!("SELECT {PROJECT_COLUMNS} FROM projects WHERE common_git_dir = ?1");
-                if let Some(p) = conn
-                    .query_row(&sql, params![common_git_dir], project_from_row)
-                    .optional()?
-                {
-                    touch_project_active_tx(conn, p.id)?;
-                    let sql = format!("SELECT {PROJECT_COLUMNS} FROM projects WHERE id = ?1");
-                    return Ok(conn.query_row(&sql, params![p.id], project_from_row)?);
-                }
+            if let Some(p) = find_project_tx(conn, remote_url, common_git_dir)? {
+                touch_project_active_tx(conn, p.id)?;
+                let sql = format!("SELECT {PROJECT_COLUMNS} FROM projects WHERE id = ?1");
+                return Ok(conn.query_row(&sql, params![p.id], project_from_row)?);
             }
 
             conn.execute(

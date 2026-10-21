@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use magpie_core::Store;
 
+mod integration;
 mod pack_source;
 mod seed;
 
@@ -52,6 +53,34 @@ enum Command {
     Export {
         #[arg(long, default_value = "json")]
         format: String,
+    },
+
+    /// Print the project's Now queue as JSON, for other tools to read (see
+    /// docs/integration.md). Read-only: never creates a project or a database.
+    ///
+    /// With no --project this reads the Inbox, like `list --now`; with one,
+    /// the folder is resolved exactly as the MCP server resolves its spawn
+    /// directory, and an unknown folder gives `"project": null`.
+    Now {
+        /// Machine-readable output (the only format this command has)
+        #[arg(long, required = true)]
+        json: bool,
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Keep items with no branch constraint or this one
+        #[arg(long)]
+        branch: Option<String>,
+    },
+
+    /// Print agent sessions as JSON, newest first (see docs/integration.md).
+    /// Read-only: it neither sweeps dead pids nor touches leases.
+    Sessions {
+        /// Machine-readable output (the only format this command has)
+        #[arg(long, required = true)]
+        json: bool,
+        /// Only sessions that have not ended
+        #[arg(long)]
+        live: bool,
     },
 
     /// Run the MCP server over stdio (what an agent host actually spawns)
@@ -126,6 +155,32 @@ async fn main() -> Result<()> {
 
     let db_path = magpie_core::default_db_path()
         .context("could not determine a data directory for this platform")?;
+
+    // The JSON reads are handled before the writable open for the same
+    // reason `seed` is: `Store::open` creates the database and sets journal
+    // mode, and a read must leave no trace. With no database yet they
+    // answer with an empty report.
+    if let Command::Now {
+        project, branch, ..
+    } = &cli.command
+    {
+        let store = Store::open_read_only(&db_path)
+            .with_context(|| format!("failed to open database at {db_path:?}"))?;
+        let scope = match project {
+            Some(dir) => integration::Scope::Folder(magpie_mcp::detect_in(Some(dir))),
+            None => integration::Scope::Inbox,
+        };
+        let report = integration::now_report(store.as_ref(), &scope, branch.as_deref())?;
+        println!("{report}");
+        return Ok(());
+    }
+    if let Command::Sessions { live, .. } = &cli.command {
+        let store = Store::open_read_only(&db_path)
+            .with_context(|| format!("failed to open database at {db_path:?}"))?;
+        println!("{}", integration::sessions_report(store.as_ref(), *live)?);
+        return Ok(());
+    }
+
     let store =
         Store::open(&db_path).with_context(|| format!("failed to open database at {db_path:?}"))?;
 
@@ -198,6 +253,9 @@ async fn main() -> Result<()> {
         }
 
         Command::Seed { .. } => unreachable!("handled above, before the default database opens"),
+        Command::Now { .. } | Command::Sessions { .. } => {
+            unreachable!("handled above, through the read-only open")
+        }
 
         Command::Pack(PackCommand::Add { source }) => {
             let (source_url, parsed) = pack_source::fetch(&source)?;

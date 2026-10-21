@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::process::Command;
 
 /// Where this MCP server was spawned -- an agent host (Claude Code, Cursor)
@@ -14,24 +15,34 @@ pub struct DetectedProject {
 }
 
 pub fn detect() -> DetectedProject {
-    let remote_url = git(&["remote", "get-url", "origin"]);
+    detect_in(None)
+}
+
+/// `detect`, as if spawned from `dir` instead of the current directory --
+/// how `magpie now --project <dir>` resolves a folder to a project exactly
+/// the way the MCP server resolves its own spawn directory.
+pub fn detect_in(dir: Option<&Path>) -> DetectedProject {
+    let remote_url = git(dir, &["remote", "get-url", "origin"]);
     // `--git-common-dir` on git < 2.31 returns a path relative to the
     // current directory rather than absolute (the `--path-format` flag
     // that fixes this is a newer addition); resolve it ourselves so the
     // result is stable regardless of git version or cwd.
-    let common_git_dir = git(&["rev-parse", "--git-common-dir"]).and_then(|p| {
+    let common_git_dir = git(dir, &["rev-parse", "--git-common-dir"]).and_then(|p| {
         let path = std::path::Path::new(&p);
         let absolute = if path.is_absolute() {
             path.to_path_buf()
         } else {
-            std::env::current_dir().ok()?.join(path)
+            match dir {
+                Some(dir) => dir.join(path),
+                None => std::env::current_dir().ok()?.join(path),
+            }
         };
         absolute
             .canonicalize()
             .ok()
             .map(|p| p.to_string_lossy().into_owned())
     });
-    let branch = git(&["rev-parse", "--abbrev-ref", "HEAD"]).filter(|b| b != "HEAD");
+    let branch = git(dir, &["rev-parse", "--abbrev-ref", "HEAD"]).filter(|b| b != "HEAD");
 
     let name = remote_url
         .as_deref()
@@ -55,7 +66,7 @@ pub fn detect() -> DetectedProject {
 /// it. `None` outside a repo or if `git` isn't on PATH -- same fallback
 /// `detect()` already uses.
 pub fn head_commit() -> Option<String> {
-    git(&["rev-parse", "HEAD"])
+    git(None, &["rev-parse", "HEAD"])
 }
 
 /// A summary of what changed since `against` (typically a `lease_head_commit`)
@@ -66,11 +77,15 @@ pub fn head_commit() -> Option<String> {
 /// callers treat a missing diff stat as "couldn't compute one", never as an
 /// error (see docs/design.md "MCP contract").
 pub fn diff_stat(against: &str) -> Option<String> {
-    git(&["diff", "--stat", against])
+    git(None, &["diff", "--stat", against])
 }
 
-fn git(args: &[&str]) -> Option<String> {
-    let output = Command::new("git").args(args).output().ok()?;
+fn git(dir: Option<&Path>, args: &[&str]) -> Option<String> {
+    let mut command = Command::new("git");
+    if let Some(dir) = dir {
+        command.current_dir(dir);
+    }
+    let output = command.args(args).output().ok()?;
     if !output.status.success() {
         return None;
     }

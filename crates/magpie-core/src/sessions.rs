@@ -1,8 +1,9 @@
 use rusqlite::{params, OptionalExtension, Row, TransactionBehavior};
 
+use crate::captures::{capture_from_row, CAPTURE_COLUMNS};
 use crate::db::now_iso;
 use crate::error::Result;
-use crate::model::Session;
+use crate::model::{Capture, Session};
 use crate::Store;
 
 fn session_from_row(row: &Row) -> rusqlite::Result<Session> {
@@ -177,6 +178,21 @@ impl Store {
             let filter_on = project_id.is_some();
             let rows = stmt.query_map(params![filter_on as i64, project_id], session_from_row)?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+    }
+
+    /// The item this session currently holds a lease on, if any. Sessions
+    /// lease one item at a time (see docs/design.md), so this is at most one.
+    pub fn leased_capture_for_session(&self, session_id: &str) -> Result<Option<Capture>> {
+        self.with_conn(|conn| {
+            let sql = format!(
+                "SELECT {CAPTURE_COLUMNS} FROM captures
+                 WHERE lease_session = ?1 AND deleted_at IS NULL
+                 ORDER BY lease_at DESC LIMIT 1"
+            );
+            Ok(conn
+                .query_row(&sql, params![session_id], capture_from_row)
+                .optional()?)
         })
     }
 

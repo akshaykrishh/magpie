@@ -15,7 +15,7 @@ use rmcp::{
 };
 use serde::{Deserialize, Serialize};
 
-pub use project::DetectedProject;
+pub use project::{detect_in, DetectedProject};
 
 /// A capture as handed back to an agent: JSON rather than free text, and
 /// always labeled with where it came from and how much to trust it -- see
