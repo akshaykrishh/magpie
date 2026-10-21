@@ -55,7 +55,8 @@ hands can empty.
   auto-expired.
 - **A CLI for everything else.** `magpie add|list|search|done|drain|export|serve-mcp` —
   scriptable, and `drain` pipes `Now` straight into an agent CLI that doesn't speak MCP.
-  Pairs with [starling](docs/integration.md) when it's installed.
+  Pairs with [starling](docs/integration.md) when it's installed: the dock shows the agents it
+  sees, and which are waiting for you.
 - **Prompt packs.** `magpie pack add github:someone/agent-prompts` imports shareable,
   fill-in-the-blank prompt templates from any git repo.
 - **Sessions, handback, and digests.** An MCP-connected agent's session is a persistent record;
@@ -89,6 +90,14 @@ magpie search retry
 
 ```bash
 claude mcp add magpie -- /path/to/magpie serve-mcp
+```
+
+Or install the Claude Code plugin, which registers the same server and adds a skill that teaches
+the agent when to take, finish, hand back and add items (it expects `magpie` on your `PATH`):
+
+```
+/plugin marketplace add akshaykrishh/claude-plugins
+/plugin install magpie@akshaykrishh
 ```
 
 ```

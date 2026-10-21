@@ -24,6 +24,21 @@ version.
   `"project": null` instead of creating one. Neither command creates the database, sweeps dead
   pids, or touches leases. The contract is in `docs/integration.md`, which also describes how
   magpie pairs with starling.
+- With [starling](docs/integration.md) installed, the desktop app lists the agents it sees on the
+  focused project in the Dock (including Claude Code sessions that have not called a magpie tool
+  yet), marks the ones waiting for you, counts them in Across, and offers open streams as
+  destinations in the hold-to-aim picker. The binary is found from `STARLING_BIN`, `PATH`, your
+  login shell or the usual install locations, so it works when the app is opened from the Dock.
+  Without starling nothing changes.
+- A Claude Code plugin (`plugins/magpie`) that registers `magpie serve-mcp` and ships a `queue`
+  skill for working the queue.
+
+### Changed
+
+- The Dock reads in sentence case, leading each row with the work, then who is doing it, then
+  whether it needs you; item rows show `+64 −11 in 2 files` instead of the raw git stat. The
+  Dock's minimum size is now 300×440.
+- Item menus ("..." and right-click) are native OS menus, so the Dock can no longer clip them.
 
 ## [0.1.1] - 2026-08-04
 

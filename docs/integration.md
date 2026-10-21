@@ -16,6 +16,20 @@ configuration and each shows the other's half.
 
 Nothing to set up on the magpie side: starling calls the two read-only commands below.
 
+And with starling installed, the magpie desktop app shows:
+
+| Where | With starling installed |
+|---|---|
+| Dock | An agent row for each Claude Code session working on the focused project: "Needs you" when starling says it is waiting, and sessions that have not called a magpie tool yet appear too, marked "not connected to magpie" |
+| Across | Those starling-only sessions count as live in a project's agent count, and every waiting agent counts as "needs you" |
+| Session strip | A "needs you" chip on a session whose agent is waiting |
+| Hold-to-aim | Each open stream whose folder is a magpie project is listed under that project; aiming at one files the capture to the project and, when the stream is not on the default branch, pins it to that branch |
+
+Nothing to set up here either: the app calls the two read-only commands in the next section.
+It looks for `starling` (`STARLING_BIN`, then `PATH`, then your login shell, then Homebrew and
+nvm locations) because an app opened from the Dock does not inherit your shell's `PATH`. If it
+finds nothing, none of this appears.
+
 ## The contract (schema 1)
 
 Each side only **reads** the other's JSON output. A missing binary, a non-zero exit, output that
