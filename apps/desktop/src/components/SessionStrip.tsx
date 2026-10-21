@@ -74,6 +74,9 @@ function SessionCard({ session }: { session: SessionView }) {
       <Mono size="xs" tone="faint">
         {elapsed(session.started_at)}
       </Mono>
+      {/* From starling, when it is installed: this agent has finished its
+          turn and is waiting on you. */}
+      {session.waiting_for_you && <Chip variant="accent">WAITING</Chip>}
       <Mono size="xs" tone="accent">
         {session.holds} HOLDS
       </Mono>

@@ -36,6 +36,19 @@ export function sessionLabel(session: {
   return `${label} · ${clientPart}`;
 }
 
+/// "S1 · Claude Code" for an agent that has called a magpie tool, plain
+/// "Claude Code" for one only starling has seen -- every starling session
+/// is a Claude Code session. Sentence case, like the Dock's other rows.
+export function agentName(agent: {
+  magpie_session: string | null;
+  ordinal: number | null;
+  client: string | null;
+}): string {
+  if (!agent.magpie_session) return "Claude Code";
+  const client = !agent.client || agent.client === "claude-code" ? "Claude Code" : agent.client;
+  return agent.ordinal != null ? `S${agent.ordinal} · ${client}` : client;
+}
+
 export type NowRowState = "open" | "leased" | "pinned" | "handback" | "done";
 
 /// Which of the Now column's five row states a capture is in -- one glyph,

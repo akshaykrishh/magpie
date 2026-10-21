@@ -32,3 +32,8 @@ export const CAPTURE_UPDATED_EVENT = "capture:updated";
 // which turns this (plus the OS setting, for "system") into the actual
 // mode a window should render.
 export const THEME_CHANGED_EVENT = "theme:changed";
+
+// Fired by the backend when what starling reports differs from the last look
+// (an agent appeared, started waiting, or starling went away) -- the windows
+// refetch rather than wait out their 5s poll. Never fired without starling.
+export const STARLING_CHANGED_EVENT = "starling:changed";

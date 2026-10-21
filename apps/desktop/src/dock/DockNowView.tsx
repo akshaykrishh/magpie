@@ -1,11 +1,15 @@
 import { AddPromptInput } from "../components/AddPromptInput";
+import { AgentRows } from "../components/AgentRows";
 import { NowList } from "../components/NowList";
-import type { Capture, Section, Session } from "../lib/types";
+import type { AgentRow, Capture, Section, Session } from "../lib/types";
 
 interface DockNowViewProps {
   now: Capture[];
   sections: Section[];
   sessions: Session[];
+  /// Agents on the focused project that starling can see -- empty without
+  /// starling.
+  agents: AgentRow[];
   onAddPrompt: (body: string) => void;
   onReorder: (id: number, afterId: number | null) => void;
   onDone: (id: number) => void;
@@ -23,6 +27,7 @@ export function DockNowView({
   now,
   sections,
   sessions,
+  agents,
   onAddPrompt,
   onReorder,
   onDone,
@@ -34,6 +39,7 @@ export function DockNowView({
 }: DockNowViewProps) {
   return (
     <>
+      <AgentRows agents={agents} />
       <AddPromptInput onAdd={onAddPrompt} />
       <div className="flex-1 overflow-y-auto">
         <NowList

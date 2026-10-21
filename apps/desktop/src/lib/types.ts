@@ -90,6 +90,40 @@ export interface SessionView {
   captures_since: number | null;
   /// Non-empty only for S0.
   top_source_apps: SourceAppCount[];
+  /// Starling reports this session's agent as waiting for you. Always
+  /// `false` without starling.
+  waiting_for_you: boolean;
+}
+
+/// What starling says an agent is doing. `ended` and `unknown` never reach
+/// a row (they are not live), but stay in the type since the wire carries
+/// whatever starling reported.
+export type AgentState = "working" | "waiting" | "active" | "idle" | "ended" | "unknown";
+
+/// One agent the Dock can list -- see src-tauri/src/starling/agents.rs.
+/// `magpie_session` is set once the agent has called a magpie tool; a row
+/// without one is a starling session magpie has not heard from yet.
+export interface AgentRow {
+  project_id: number;
+  magpie_session: string | null;
+  /// `S1`-style ordinal and MCP client name, for a row with a
+  /// `magpie_session`.
+  ordinal: number | null;
+  client: string | null;
+  starling_session: string;
+  title: string | null;
+  branch: string | null;
+  state: AgentState;
+  /// Epoch milliseconds the agent entered `state`.
+  since: number | null;
+  stream: string | null;
+}
+
+/// `present` is `false` when starling is not installed (or not answering):
+/// the windows draw nothing for it.
+export interface AgentsView {
+  present: boolean;
+  agents: AgentRow[];
 }
 
 // Not a raw table row -- a computed rollup (see
@@ -117,6 +151,12 @@ export interface ProjectOverview {
   /// Display-only Now capacity (see `settings.now_cap`) -- same value on
   /// every row. Never enforced.
   now_cap: number;
+  /// Agents waiting for you in this project, per starling -- matched or
+  /// not. Apart from `needs_review_count` (handbacks only) so a "needs
+  /// review" label never describes an agent that is merely waiting.
+  /// `active_session_count` already includes the starling sessions magpie
+  /// has not heard from yet.
+  agents_waiting_count: number;
 }
 
 export interface Tag {

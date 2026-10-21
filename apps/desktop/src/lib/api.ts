@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AgentsView,
   AuditEntry,
   AuditEntryView,
   Blob,
@@ -84,6 +85,8 @@ export const api = {
     invoke<Session[]>("list_sessions", { projectId }),
 
   listSessionsView: () => invoke<SessionView[]>("list_sessions_view"),
+
+  listAgents: () => invoke<AgentsView>("list_agents"),
 
   listProjectsOverview: () => invoke<ProjectOverview[]>("list_projects_overview"),
 

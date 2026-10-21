@@ -6,11 +6,26 @@ import { DockCapturesView } from "./dock/DockCapturesView";
 import { DockNowView } from "./dock/DockNowView";
 import { DockTabs, type DockTab } from "./dock/DockTabs";
 import { api } from "./lib/api";
-import { DOCK_SHOWN_EVENT, NOW_CHANGED_EVENT, SECTIONS_CHANGED_EVENT } from "./lib/events";
-import type { Capture, ProjectOverview, Section, Session } from "./lib/types";
+import {
+  DOCK_SHOWN_EVENT,
+  NOW_CHANGED_EVENT,
+  SECTIONS_CHANGED_EVENT,
+  STARLING_CHANGED_EVENT,
+} from "./lib/events";
+import type { AgentRow, Capture, ProjectOverview, Section, Session } from "./lib/types";
 import { useProjectSignal } from "./state/useProjectSignal";
 
 const DEFAULT_NOW_CAP = 7;
+
+/// "rook-api 3 · 1 waiting" -- queued depth only when there is some, and
+/// only the parts that have something to say.
+function footerLabel(o: ProjectOverview): string {
+  const parts = [o.project_name];
+  if (o.now_count > 0) parts[0] += ` ${o.now_count}`;
+  if (o.needs_review_count > 0) parts.push(`${o.needs_review_count} needs review`);
+  if (o.agents_waiting_count > 0) parts.push(`${o.agents_waiting_count} waiting`);
+  return parts.join(" · ");
+}
 
 /// The pinned dock: a compact, always-on-top view of Now, meant to sit
 /// beside whatever you're actually working in. Deliberately just Now --
@@ -22,6 +37,7 @@ function DockApp() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [nowCap, setNowCap] = useState(DEFAULT_NOW_CAP);
   const [overview, setOverview] = useState<ProjectOverview[]>([]);
+  const [agents, setAgents] = useState<AgentRow[]>([]);
   const [tab, setTab] = useState<DockTab>("now");
   const projectSignal = useProjectSignal();
   const [peekedProjectId, setPeekedProjectId] = useState<number | null>(null);
@@ -57,11 +73,19 @@ function DockApp() {
     api.listProjectsOverview().then(setOverview).catch(console.error);
   }, []);
 
+  const refreshAgents = useCallback(() => {
+    api
+      .listAgents()
+      .then((view) => setAgents(view.agents))
+      .catch(console.error);
+  }, []);
+
   useEffect(() => {
     refreshNow();
     refreshSections();
     refreshSessions();
     refreshOverview();
+    refreshAgents();
     api
       .getSetting("now_cap")
       .then((v) => setNowCap(v ? Number(v) : DEFAULT_NOW_CAP))
@@ -71,10 +95,13 @@ function DockApp() {
     // MCP agent is a separate process and can't emit a Tauri event into
     // this window, so sessions/overview -- both of which change from
     // agent-only activity like queue_take -- need a poll, not just event
-    // listeners.
+    // listeners. Starling's agents ride the same poll: asking is cheap (the
+    // backend answers from memory and refreshes itself at most every 5s),
+    // and a starling:changed event below covers the in-between.
     const poll = setInterval(() => {
       refreshSessions();
       refreshOverview();
+      refreshAgents();
     }, 5000);
 
     const unlisten = listen(NOW_CHANGED_EVENT, () => {
@@ -82,15 +109,20 @@ function DockApp() {
       refreshSessions();
       refreshOverview();
     });
+    const unlistenStarling = listen(STARLING_CHANGED_EVENT, () => {
+      refreshOverview();
+      refreshAgents();
+    });
     const unlistenSections = listen(SECTIONS_CHANGED_EVENT, refreshSections);
     const unlistenDockShown = listen(DOCK_SHOWN_EVENT, () => setPeekedProjectId(null));
     return () => {
       clearInterval(poll);
       unlisten.then((f) => f());
+      unlistenStarling.then((f) => f());
       unlistenSections.then((f) => f());
       unlistenDockShown.then((f) => f());
     };
-  }, [refreshNow, refreshSections, refreshSessions, refreshOverview]);
+  }, [refreshNow, refreshSections, refreshSessions, refreshOverview, refreshAgents]);
 
   async function handleAddPrompt(body: string) {
     await api.addTypedCapture(body);
@@ -165,10 +197,18 @@ function DockApp() {
   // here to avoid showing the same count twice. Earned: absent when
   // there's nothing to report, not shown as an empty footer.
   const otherDepths = overview.filter(
-    (o) => o.project_id !== null && o.project_id !== effectiveProjectId && o.now_count > 0,
+    (o) =>
+      o.project_id !== null &&
+      o.project_id !== effectiveProjectId &&
+      (o.now_count > 0 || o.agents_waiting_count > 0),
   );
 
-  const liveSessionCount = sessions.filter((s) => s.ended_at === null).length;
+  // Starling's agents that magpie has not heard from yet count as live too;
+  // the ones it has are already among `sessions`.
+  const liveSessionCount =
+    sessions.filter((s) => s.ended_at === null).length +
+    agents.filter((a) => a.magpie_session === null).length;
+  const focusedAgents = agents.filter((a) => a.project_id === effectiveProjectId);
 
   return (
     <main className="flex h-screen flex-col gap-2 overflow-hidden bg-white/95 p-2 dark:bg-neutral-950/95">
@@ -184,14 +224,20 @@ function DockApp() {
             which is what happens to a long project + branch name in a
             300px dock without both. */}
         <Earned when={focused != null}>
-          <Chip variant="neutral" className="min-w-0 flex-1 truncate">
+          <Chip
+            variant="neutral"
+            className="min-w-[2.5rem] flex-1"
+            title={focused ? `${focused.project_name}${focused.branch ? ` on ${focused.branch}` : ""}` : undefined}
+          >
             {focused?.project_name.toUpperCase()}
             {focused?.branch ? ` · ON ${focused.branch.toUpperCase()}` : ""}
           </Chip>
         </Earned>
         <Earned when={liveSessionCount > 0}>
           <Mono size="xs" tone="accent" className="ml-auto shrink-0">
-            {liveSessionCount} LIVE
+            {liveSessionCount}
+            {/* The word goes first when the dock is at its narrowest. */}
+            <span className="max-[259px]:hidden"> LIVE</span>
           </Mono>
         </Earned>
       </div>
@@ -201,6 +247,7 @@ function DockApp() {
           now={now}
           sections={sections}
           sessions={sessions}
+          agents={focusedAgents}
           onAddPrompt={handleAddPrompt}
           onReorder={handleReorder}
           onDone={handleDone}
@@ -220,11 +267,11 @@ function DockApp() {
           {otherDepths.map((o) => (
             <Chip
               key={o.project_id}
-              variant={o.needs_review_count > 0 ? "accent" : "neutral"}
+              variant={o.needs_review_count > 0 || o.agents_waiting_count > 0 ? "accent" : "neutral"}
+              title={footerLabel(o)}
               onClick={() => setPeekedProjectId(o.project_id)}
             >
-              {o.project_name.toUpperCase()} {o.now_count}
-              {o.needs_review_count > 0 ? ` · ${o.needs_review_count} NEEDS REVIEW` : ""}
+              {footerLabel(o).toUpperCase()}
             </Chip>
           ))}
         </div>

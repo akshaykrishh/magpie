@@ -9,6 +9,8 @@ export interface ChipProps {
   variant?: ChipVariant;
   size?: "sm" | "md";
   className?: string;
+  /** Full text for a chip that may be truncated. */
+  title?: string;
   onClick?: () => void;
 }
 
@@ -27,21 +29,24 @@ const VARIANT_CLASS: Record<ChipVariant, string> = {
 /// (stated fact / available action / primary action) stay consistent
 /// everywhere a chip appears, rather than each row type inventing its own
 /// border+padding combination.
-export function Chip({ children, variant = "neutral", size = "sm", className, onClick }: ChipProps) {
+export function Chip({ children, variant = "neutral", size = "sm", className, title, onClick }: ChipProps) {
   const Tag = onClick ? "button" : "span";
   return (
     <Tag
       type={onClick ? "button" : undefined}
       onClick={onClick}
+      title={title}
       className={cn(
-        "inline-flex items-center gap-1 rounded-xs",
+        // max-w-full + a truncating label: a long name ends in an ellipsis
+        // inside the chip instead of wrapping or spilling out of its row.
+        "inline-flex max-w-full items-center gap-1 rounded-xs",
         size === "sm" ? "px-1.5 py-0.5" : "px-2 py-1",
         onClick && "cursor-pointer hover:opacity-80",
         VARIANT_CLASS[variant],
         className,
       )}
     >
-      <Mono size={size === "sm" ? "sm" : "md"} tone={variant === "solid" ? "on-accent" : variant === "accent" ? "accent" : "muted"}>
+      <Mono className="min-w-0 truncate" size={size === "sm" ? "sm" : "md"} tone={variant === "solid" ? "on-accent" : variant === "accent" ? "accent" : "muted"}>
         {children}
       </Mono>
     </Tag>

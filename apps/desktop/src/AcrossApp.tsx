@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { CapacityDots, Chip, Earned, Kbd, Mono } from "./components/ui";
+import { CapacityDots, Chip, Earned, Kbd, Mono, StatusGlyph } from "./components/ui";
 import { ResumeCard, type ResumeContext } from "./components/ResumeCard";
 import { api } from "./lib/api";
+import { STARLING_CHANGED_EVENT } from "./lib/events";
 import { fetchResumeContext } from "./lib/resume";
 import type { ProjectOverview } from "./lib/types";
 
@@ -36,8 +37,14 @@ function AcrossApp() {
   useEffect(() => {
     refresh();
     const unlisten = listen("across:show", refresh);
+    // An agent appearing or starting to wait while Across is open: refetch
+    // the counts only, without clearing what was typed.
+    const unlistenStarling = listen(STARLING_CHANGED_EVENT, () => {
+      api.listProjectsOverview().then(setRows).catch(console.error);
+    });
     return () => {
       unlisten.then((f) => f());
+      unlistenStarling.then((f) => f());
     };
   }, [refresh]);
 
@@ -142,9 +149,24 @@ function AcrossApp() {
                 <Mono size="xs" tone={i === highlighted ? "accent" : "faint"} className="w-3">
                   {digitForIndex(i)}
                 </Mono>
-                <span className="truncate">{row.project_name}</span>
+                <span className="min-w-0 flex-1 truncate" title={row.project_name}>
+                  {row.project_name}
+                </span>
                 <Earned when={row.now_count > 0}>
                   <CapacityDots filled={Math.min(row.now_count, row.now_cap)} cap={row.now_cap} />
+                </Earned>
+                {/* The attention dot the hand-back row uses, plus how many
+                    agents are waiting; the name above gives way first. */}
+                <Earned when={row.agents_waiting_count > 0}>
+                  <span
+                    className="flex shrink-0 items-center gap-1"
+                    title={`${row.agents_waiting_count} waiting for you`}
+                  >
+                    <StatusGlyph state="handback" size={8} />
+                    <Mono size="xs" tone="accent">
+                      {row.agents_waiting_count}
+                    </Mono>
+                  </span>
                 </Earned>
                 <Earned when={(row.unfiled_count ?? 0) > 0}>
                   <Mono size="xs" tone="faint" className="ml-auto">
@@ -156,9 +178,19 @@ function AcrossApp() {
           )}
         </div>
         <div className="flex-1 overflow-y-auto">
-          <Earned when={!!current?.branch}>
-            <div className="px-3 pt-3">
-              <Chip variant="neutral">ON {current?.branch?.toUpperCase()}</Chip>
+          <Earned
+            when={!!current?.branch || (current?.active_session_count ?? 0) > 0}
+          >
+            <div className="flex flex-wrap gap-1.5 px-3 pt-3">
+              <Earned when={!!current?.branch}>
+                <Chip variant="neutral">ON {current?.branch?.toUpperCase()}</Chip>
+              </Earned>
+              <Earned when={(current?.active_session_count ?? 0) > 0}>
+                <Chip variant="neutral">{current?.active_session_count} LIVE</Chip>
+              </Earned>
+              <Earned when={(current?.agents_waiting_count ?? 0) > 0}>
+                <Chip variant="accent">{current?.agents_waiting_count} WAITING</Chip>
+              </Earned>
             </div>
           </Earned>
           <ResumeCard {...resume} />
