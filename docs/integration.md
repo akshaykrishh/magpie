@@ -105,7 +105,8 @@ magpie session belongs to the starling session whose pid is the parent of magpie
 
 Both commands only read. They do not run the dead-pid sweep, release or take leases, or create
 a project or a database: with no database yet, `now` reports `"project": null, "items": []`
-and `sessions` reports `[]`, with exit 0. A database written by an older magpie is migrated on
-first read, the same as every other command does. Fields that magpie has not recorded (a
+and `sessions` reports `[]`, with exit 0. A database written by an older magpie is not migrated by a read (that would race the app's own
+migration): the commands answer as if it were empty and print a hint on stderr, "open magpie
+once to upgrade its database". Fields that magpie has not recorded (a
 session's `client` before its first tool call, a lease's `pid`) are `null`. Timestamps are UTC
 RFC 3339 with sub-second precision, for example `2026-10-21T10:00:00.123456000Z`.

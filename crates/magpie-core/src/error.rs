@@ -38,6 +38,12 @@ pub enum Error {
     #[error("blob {0} not found")]
     BlobNotFound(i64),
 
+    /// A read-only open found a schema older than this build. Reading it
+    /// as-is would fail on missing columns and migrating it is a write, so
+    /// the caller is told instead; launching magpie once upgrades it.
+    #[error("the database is older than this magpie; open magpie once to upgrade it")]
+    SchemaOutdated,
+
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 

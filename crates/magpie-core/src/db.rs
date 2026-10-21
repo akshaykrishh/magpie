@@ -4,7 +4,7 @@ use std::sync::{LazyLock, Mutex};
 use rusqlite::{Connection, OpenFlags};
 use time::OffsetDateTime;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 /// RFC3339 with fractional seconds *always* present at a fixed 9-digit
 /// width, never `well_known::Rfc3339` -- that formatter omits the
@@ -53,6 +53,35 @@ pub fn purge_cutoff(days: i64) -> String {
 /// trick `purge_cutoff` relies on).
 pub fn iso_plus_hours(hours: i64) -> String {
     format_iso(OffsetDateTime::now_utc() + time::Duration::hours(hours))
+}
+
+fn wal_path(path: &Path) -> std::path::PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push("-wal");
+    name.into()
+}
+
+/// `PRAGMA user_version`, straight from the file header (4 bytes, big-endian,
+/// at offset 60). A file too short to have one -- empty, or not a database at
+/// all -- is version 0, which is what SQLite itself reports for an empty
+/// file.
+fn header_schema_version(path: &Path) -> Result<i64> {
+    use std::io::Read;
+    let mut header = [0u8; 64];
+    let mut file = std::fs::File::open(path)?;
+    let mut filled = 0;
+    while filled < header.len() {
+        match file.read(&mut header[filled..])? {
+            0 => break,
+            n => filled += n,
+        }
+    }
+    if filled < header.len() {
+        return Ok(0);
+    }
+    Ok(i64::from(u32::from_be_bytes([
+        header[60], header[61], header[62], header[63],
+    ])))
 }
 
 const MIGRATIONS: &[(&str, &str)] = &[
@@ -150,25 +179,35 @@ impl Store {
 
     /// Opens an existing database for reading only, for callers that must
     /// never leave a trace -- `Ok(None)` when no database exists yet, and no
-    /// directory, file, journal mode or migration is written in any case.
+    /// directory, file, journal file, journal mode or migration is written
+    /// in any case.
     ///
     /// A database whose schema is older than this build (a fresh upgrade
-    /// nobody has launched yet) is opened the ordinary way instead, which
-    /// migrates it exactly as every other command does: reading it as-is
-    /// would fail on missing columns.
+    /// nobody has launched yet) is `Err(Error::SchemaOutdated)`: reading it
+    /// as-is would fail on missing columns, and migrating it from here would
+    /// be a write that can race the app's own migration.
     pub fn open_read_only(path: impl AsRef<Path>) -> Result<Option<Self>> {
-        if !path.as_ref().exists() {
+        let path = path.as_ref();
+        if !path.exists() {
             return Ok(None);
         }
+        let current = MIGRATIONS.len() as i64;
+        // With no write-ahead log beside it the file header is the whole
+        // truth, and reading it is plain file I/O: even a read-only SQLite
+        // connection creates `-wal`/`-shm` files when it opens a database in
+        // WAL mode. (With a log present, the app is running or just was,
+        // those files already exist, and SQLite is asked below.)
+        if !wal_path(path).exists() && header_schema_version(path)? < current {
+            return Err(Error::SchemaOutdated);
+        }
         let conn = Connection::open_with_flags(
-            path.as_ref(),
+            path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if version < MIGRATIONS.len() as i64 {
-            drop(conn);
-            return Self::open(path).map(Some);
+        if version < current {
+            return Err(Error::SchemaOutdated);
         }
         Ok(Some(Self {
             conn: Mutex::new(conn),
@@ -254,6 +293,75 @@ fn migrate_migrations(conn: &Connection, migrations: &[(&str, &str)]) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Everything in `dir`, as (name, bytes), so a test can prove a read
+    /// changed nothing and left nothing behind.
+    fn snapshot(dir: &Path) -> Vec<(String, Vec<u8>)> {
+        let mut files: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| {
+                let e = e.unwrap();
+                (
+                    e.file_name().to_string_lossy().into_owned(),
+                    std::fs::read(e.path()).unwrap(),
+                )
+            })
+            .collect();
+        files.sort();
+        files
+    }
+
+    // A database as an older magpie left it: WAL mode, behind on migrations.
+    // Reading it read-only must neither migrate it (that races the app's own
+    // migration) nor so much as create a -wal/-shm beside it.
+    #[test]
+    fn open_read_only_reports_an_old_schema_and_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("magpie.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+            conn.execute_batch(
+                "CREATE TABLE captures (id INTEGER PRIMARY KEY); PRAGMA user_version = 3;",
+            )
+            .unwrap();
+        }
+        let before = snapshot(dir.path());
+        assert!(!before
+            .iter()
+            .any(|(n, _)| n.ends_with("-wal") || n.ends_with("-shm")));
+
+        let result = Store::open_read_only(&path);
+
+        assert!(matches!(result, Err(Error::SchemaOutdated)));
+        assert_eq!(
+            snapshot(dir.path()),
+            before,
+            "bytes unchanged, no -wal/-shm created"
+        );
+    }
+
+    #[test]
+    fn open_read_only_leaves_an_empty_file_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("magpie.db");
+        std::fs::write(&path, b"").unwrap();
+        let before = snapshot(dir.path());
+
+        assert!(matches!(
+            Store::open_read_only(&path),
+            Err(Error::SchemaOutdated)
+        ));
+        assert_eq!(snapshot(dir.path()), before);
+    }
+
+    #[test]
+    fn open_read_only_opens_a_current_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("magpie.db");
+        drop(Store::open(&path).unwrap());
+        assert!(Store::open_read_only(&path).unwrap().is_some());
+    }
 
     // Regression test for a real bug found against a live user database:
     // the old `migrate()` bumped `user_version` once, after the whole

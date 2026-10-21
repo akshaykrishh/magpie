@@ -164,7 +164,7 @@ async fn main() -> Result<()> {
         project, branch, ..
     } = &cli.command
     {
-        let store = Store::open_read_only(&db_path)
+        let store = integration::open_for_report(&db_path)
             .with_context(|| format!("failed to open database at {db_path:?}"))?;
         let scope = match project {
             Some(dir) => integration::Scope::Folder(magpie_mcp::detect_in(Some(dir))),
@@ -175,7 +175,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     if let Command::Sessions { live, .. } = &cli.command {
-        let store = Store::open_read_only(&db_path)
+        let store = integration::open_for_report(&db_path)
             .with_context(|| format!("failed to open database at {db_path:?}"))?;
         println!("{}", integration::sessions_report(store.as_ref(), *live)?);
         return Ok(());

@@ -24,6 +24,20 @@ pub enum Scope {
     Folder(DetectedProject),
 }
 
+/// Opens the database for a JSON read. A missing database and one older than
+/// this build both answer with the empty report (`None`), because other
+/// tools read this and the contract has no error shape; the old one also
+/// gets a hint on stderr, since only launching magpie can upgrade it.
+pub fn open_for_report(path: &std::path::Path) -> Result<Option<Store>> {
+    match Store::open_read_only(path) {
+        Err(magpie_core::Error::SchemaOutdated) => {
+            eprintln!("magpie: {}", magpie_core::Error::SchemaOutdated);
+            Ok(None)
+        }
+        other => Ok(other?),
+    }
+}
+
 /// The first line of an item, untruncated -- the item's title.
 fn title(body: &str) -> &str {
     body.lines().next().unwrap_or("").trim_end()
@@ -346,6 +360,41 @@ mod tests {
         drop(store);
 
         assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    /// Everything in `dir`, as (name, bytes), so a test can prove a read
+    /// changed nothing and left nothing behind.
+    fn snapshot(dir: &std::path::Path) -> Vec<(String, Vec<u8>)> {
+        let mut files: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| {
+                let e = e.unwrap();
+                (
+                    e.file_name().to_string_lossy().into_owned(),
+                    std::fs::read(e.path()).unwrap(),
+                )
+            })
+            .collect();
+        files.sort();
+        files
+    }
+
+    #[test]
+    fn a_zero_byte_file_is_left_alone_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("magpie.db");
+        std::fs::write(&path, b"").unwrap();
+        let before = snapshot(dir.path());
+
+        assert!(matches!(
+            Store::open_read_only(&path).err(),
+            Some(magpie_core::Error::SchemaOutdated)
+        ));
+        assert_eq!(snapshot(dir.path()), before);
+        assert!(
+            open_for_report(&path).unwrap().is_none(),
+            "the reports see it as empty"
+        );
     }
 
     #[test]
