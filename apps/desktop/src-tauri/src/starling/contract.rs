@@ -72,12 +72,22 @@ impl StarlingStream {
     }
 }
 
+/// The entries under `key` of a schema-1 document. The document as a whole
+/// has to be right (valid JSON, schema 1, `key` an array), but one entry that
+/// does not fit -- missing its id, say -- is skipped rather than costing the
+/// others.
 fn parse_list<T: for<'de> Deserialize<'de>>(text: &str, key: &str) -> Option<Vec<T>> {
     let value: Value = serde_json::from_str(text).ok()?;
     if value.get("schema")?.as_u64()? != SCHEMA {
         return None;
     }
-    serde_json::from_value(value.get(key)?.clone()).ok()
+    let entries = value.get(key)?.as_array()?;
+    Some(
+        entries
+            .iter()
+            .filter_map(|entry| serde_json::from_value(entry.clone()).ok())
+            .collect(),
+    )
 }
 
 pub fn parse_sessions(text: &str) -> Option<Vec<StarlingSession>> {
@@ -174,10 +184,21 @@ mod tests {
             r#"{"schema":"1","sessions":[]}"#,
             r#"{"schema":1}"#,
             r#"{"schema":1,"sessions":"nope"}"#,
-            r#"{"schema":1,"sessions":[{"cwd":"/r","state":"idle"}]}"#,
         ] {
             assert_eq!(parse_sessions(text), None, "{text}");
         }
+    }
+
+    #[test]
+    fn one_malformed_entry_is_skipped_not_fatal() {
+        let text = r#"{"schema":1,"sessions":[
+            {"cwd":"/r","state":"idle"},
+            {"id":"ok","cwd":"/r","state":"working"},
+            {"id":"bad","cwd":"/r","state":7},
+            "not even an object"]}"#;
+        let sessions = parse_sessions(text).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "ok");
     }
 
     #[test]

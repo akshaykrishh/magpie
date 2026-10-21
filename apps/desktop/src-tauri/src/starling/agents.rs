@@ -167,10 +167,15 @@ pub fn compose(
         .filter_map(|s| s.pid.map(|pid| (pid, s)))
         .collect();
 
+    // One row per starling session. Several magpie sessions can sit under
+    // one `claude` (a restarted MCP server, say); the newest speaks for it.
+    let mut newest_first: Vec<&Session> = live_sessions.iter().collect();
+    newest_first.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+
     let mut matched: HashSet<&str> = HashSet::new();
     let mut rows = Vec::new();
 
-    for session in live_sessions {
+    for session in newest_first {
         let Some(project_id) = session.project_id else {
             continue;
         };
@@ -182,7 +187,9 @@ pub fn compose(
         else {
             continue;
         };
-        matched.insert(starling.id.as_str());
+        if !matched.insert(starling.id.as_str()) {
+            continue;
+        }
         rows.push(AgentRow {
             project_id,
             magpie_session: Some(session.id.clone()),
@@ -193,7 +200,7 @@ pub fn compose(
     }
 
     for starling in &snapshot.sessions {
-        if !starling.state.is_live() || matched.contains(starling.id.as_str()) {
+        if !starling.state.is_live() || !matched.insert(starling.id.as_str()) {
             continue;
         }
         let Some((project_id, _)) = snapshot.places.get(&starling.cwd).and_then(project_of) else {
@@ -413,6 +420,31 @@ mod tests {
         );
         let rows = compose(&snap, &[magpie("m1", 5151, Some(8))], &lookup);
         assert_eq!(rows[0].project_id, 8);
+    }
+
+    #[test]
+    fn two_magpie_sessions_under_one_agent_make_one_row_with_the_newest() {
+        let snap = snapshot(
+            vec![starling("s1", Some(4242), "/shop", SessionState::Working)],
+            &[(5151, 4242), (5252, 4242)],
+        );
+        let mut older = magpie("m-old", 5151, Some(7));
+        older.started_at = "2026-10-21T09:00:00Z".to_string();
+        let newer = magpie("m-new", 5252, Some(7));
+
+        // Either order in, the same single row out.
+        for live in [vec![older.clone(), newer.clone()], vec![newer, older]] {
+            let rows = compose(&snap, &live, &lookup);
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].magpie_session.as_deref(), Some("m-new"));
+        }
+    }
+
+    #[test]
+    fn a_starling_session_listed_twice_is_one_row() {
+        let dup = starling("s1", Some(1), "/shop", SessionState::Waiting);
+        let snap = snapshot(vec![dup.clone(), dup], &[]);
+        assert_eq!(compose(&snap, &[], &lookup).len(), 1);
     }
 
     #[test]
