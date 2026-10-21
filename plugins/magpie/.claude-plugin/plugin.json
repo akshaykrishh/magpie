@@ -1,0 +1,10 @@
+{
+  "name": "magpie",
+  "version": "0.1.1",
+  "description": "Work the magpie queue from Claude Code: registers magpie's MCP server and teaches when to take, finish, hand back and add items.",
+  "author": { "name": "Akshay Krishna" },
+  "homepage": "https://github.com/akshaykrishh/magpie",
+  "repository": "https://github.com/akshaykrishh/magpie",
+  "license": "GPL-3.0-only",
+  "keywords": ["magpie", "queue", "mcp", "capture"]
+}
